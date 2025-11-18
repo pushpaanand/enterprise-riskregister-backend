@@ -1,16 +1,16 @@
 {
-  "/api/auth/login/route": "app/api/auth/login/route.js",
-  "/api/ai/ping/route": "app/api/ai/ping/route.js",
   "/api/incidents/[id]/history/route": "app/api/incidents/[id]/history/route.js",
   "/api/departments/route": "app/api/departments/route.js",
+  "/api/ai/ping/route": "app/api/ai/ping/route.js",
+  "/api/risks/[id]/history/route": "app/api/risks/[id]/history/route.js",
+  "/api/departments/[id]/route": "app/api/departments/[id]/route.js",
   "/api/incidents/[id]/route": "app/api/incidents/[id]/route.js",
-  "/api/notifications/unit/route": "app/api/notifications/unit/route.js",
   "/api/ai/summary/route": "app/api/ai/summary/route.js",
   "/api/incidents/route": "app/api/incidents/route.js",
-  "/api/users/[id]/route": "app/api/users/[id]/route.js",
+  "/api/auth/login/route": "app/api/auth/login/route.js",
+  "/api/notifications/unit/route": "app/api/notifications/unit/route.js",
   "/api/risks/[id]/route": "app/api/risks/[id]/route.js",
+  "/api/users/[id]/route": "app/api/users/[id]/route.js",
   "/api/risks/route": "app/api/risks/route.js",
-  "/api/users/route": "app/api/users/route.js",
-  "/api/departments/[id]/route": "app/api/departments/[id]/route.js",
-  "/api/risks/[id]/history/route": "app/api/risks/[id]/history/route.js"
+  "/api/users/route": "app/api/users/route.js"
 }
