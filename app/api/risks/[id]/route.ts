@@ -25,7 +25,6 @@ export async function PUT(
     }
     const body = await req.json();
     const {
-      name,
       description,
       impact,
       likelihood,
@@ -33,7 +32,7 @@ export async function PUT(
       identification,
       existingControlInPlace,
       planOfAction,
-      categoryId,
+      category,
       changedByUserId, // optional: who made the change (GUID)
       rejectionReason,
     } = body || {};
@@ -42,7 +41,7 @@ export async function PUT(
 
     // Load existing row to detect changes
     const existingSel = await pool.request().input('RiskId', riskId).query(`
-      SELECT Name, Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId, RejectionReason
+      SELECT Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId AS Category, RejectionReason
       FROM dbo.Risks WHERE RiskId = @RiskId
     `);
     const existing = existingSel.recordset[0] || {};
@@ -72,7 +71,6 @@ export async function PUT(
 
     const rq = pool.request();
     rq.input('RiskId', riskId);
-    if (name !== undefined) rq.input('Name', name);
     if (description !== undefined) rq.input('Description', description);
     if (impact !== undefined) rq.input('Impact', impact);
     if (likelihood !== undefined) rq.input('Likelihood', likelihood);
@@ -80,12 +78,14 @@ export async function PUT(
     if (identification !== undefined) rq.input('Identification', identification);
     if (existingControlInPlace !== undefined) rq.input('ExistingControlInPlace', existingControlInPlace);
     if (planOfAction !== undefined) rq.input('PlanOfAction', planOfAction);
-    if (categoryId !== undefined) rq.input('CategoryId', categoryId);
+    if (category !== undefined) {
+      const categoryValue = category ? String(category).trim() : null;
+      rq.input('CategoryId', categoryValue || null);
+    }
     if (normalizedRejectionReason !== undefined) rq.input('RejectionReason', normalizedRejectionReason);
 
     // Build dynamic SET clause only for provided fields
     const sets: string[] = [];
-    if (name !== undefined) sets.push('Name = @Name');
     if (description !== undefined) sets.push('Description = @Description');
     if (impact !== undefined) sets.push('Impact = @Impact');
     if (likelihood !== undefined) sets.push('Likelihood = @Likelihood');
@@ -93,7 +93,7 @@ export async function PUT(
     if (identification !== undefined) sets.push('Identification = @Identification');
     if (existingControlInPlace !== undefined) sets.push('ExistingControlInPlace = @ExistingControlInPlace');
     if (planOfAction !== undefined) sets.push('PlanOfAction = @PlanOfAction');
-    if (categoryId !== undefined) sets.push('CategoryId = @CategoryId');
+    if (category !== undefined) sets.push('CategoryId = @CategoryId');
     if (rejectionReason !== undefined) sets.push('RejectionReason = @RejectionReason');
     sets.push('UpdatedAtUtc = SYSUTCDATETIME()');
 
@@ -110,7 +110,6 @@ export async function PUT(
 
     // Insert history rows for changed fields
     const changes: Array<{ field: string; oldVal: any; newVal: any }> = [];
-    if (name !== undefined && name !== existing.Name) changes.push({ field: 'Name', oldVal: existing.Name, newVal: name });
     if (description !== undefined && description !== existing.Description) changes.push({ field: 'Description', oldVal: existing.Description, newVal: description });
     if (impact !== undefined && impact !== existing.Impact) changes.push({ field: 'Impact', oldVal: existing.Impact, newVal: impact });
     if (likelihood !== undefined && likelihood !== existing.Likelihood) changes.push({ field: 'Likelihood', oldVal: existing.Likelihood, newVal: likelihood });
@@ -118,7 +117,13 @@ export async function PUT(
     if (identification !== undefined && identification !== existing.Identification) changes.push({ field: 'Identification', oldVal: existing.Identification, newVal: identification });
     if (existingControlInPlace !== undefined && existingControlInPlace !== existing.ExistingControlInPlace) changes.push({ field: 'ExistingControlInPlace', oldVal: existing.ExistingControlInPlace, newVal: existingControlInPlace });
     if (planOfAction !== undefined && planOfAction !== existing.PlanOfAction) changes.push({ field: 'PlanOfAction', oldVal: existing.PlanOfAction, newVal: planOfAction });
-    if (categoryId !== undefined && categoryId !== existing.CategoryId) changes.push({ field: 'CategoryId', oldVal: existing.CategoryId, newVal: categoryId });
+    if (category !== undefined) {
+      const categoryValue = category ? String(category).trim() : null;
+      const existingCategory = existing.Category ?? null;
+      if (categoryValue !== existingCategory) {
+        changes.push({ field: 'Category', oldVal: existingCategory, newVal: categoryValue });
+      }
+    }
     if (normalizedRejectionReason !== undefined) {
       const normalizedExistingReason = existing.RejectionReason ?? null;
       const normalizedNewReason = normalizedRejectionReason;
@@ -154,7 +159,8 @@ export async function PUT(
     if (statusChangedToNew) {
       try {
         const detailRs = await pool.request().input('RiskId', riskId).query(`
-          SELECT r.RiskNo, r.Name, r.Description, d.Name AS DepartmentName
+          SELECT r.RiskNo, r.Description, r.Impact, r.Likelihood,
+                 r.Identification, r.PlanOfAction, d.Name AS DepartmentName
           FROM dbo.Risks r
           LEFT JOIN dbo.Departments d ON d.DepartmentId = r.DepartmentId
           WHERE r.RiskId = @RiskId
@@ -183,11 +189,18 @@ export async function PUT(
               const subject = `Risk approved: ${info.RiskNo || ''} - ${info.Name}`;
               const text = `Dear Unit Head,
 
-Risk ${info.RiskNo || ''} (${info.Name || ''}) from ${info.DepartmentName || 'the department'} has been approved by the manager.
+A risk was raised and approved in ${info.DepartmentName || 'the department'}.
 
-If your unit experiences a similar situation, please review and confirm if any actions are required.
+Risk Details:
+- Risk ID: ${info.RiskNo || 'N/A'}
+- Title: ${info.Name || 'N/A'}
+- Description: ${info.Description || 'N/A'}
+- Impact: ${info.Impact || 'N/A'}
+- Likelihood: ${info.Likelihood || 'N/A'}
+- Identification: ${info.Identification || 'N/A'}
+- Plan of Action: ${info.PlanOfAction || 'N/A'}
 
-Description: ${info.Description || 'N/A'}
+If your unit encounters a similar situation, please review and confirm any required actions.
 
 Thanks.`;
               await transporter.sendMail({

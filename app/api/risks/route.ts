@@ -22,8 +22,8 @@ function derivePrefixFromName(input: string | null | undefined): string {
 export async function GET() {
   const pool = await getPool();
   const rs = await pool.request().query(`
-    SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Name, r.Description,
-           r.CategoryId,
+    SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Description,
+           r.CategoryId AS Category,
            r.Identification, r.ExistingControlInPlace, r.PlanOfAction,
            r.Impact, r.Likelihood, r.Status, r.OwnerId, o.Name AS Owner,
            r.CreatedByUserId, u.Name AS CreatedByName,
@@ -151,7 +151,6 @@ export async function POST(req: Request) {
   const rq = pool.request();
   rq.input('DepartmentId', departmentId);
   rq.input('RiskNo', riskNo || body.riskNo);
-  rq.input('Name', body.name);
   rq.input('Description', body.description);
   rq.input('Impact', body.impact);
   rq.input('Likelihood', body.likelihood);
@@ -174,24 +173,24 @@ export async function POST(req: Request) {
   }
   rq.input('OwnerId', ownerIdToUse);
   rq.input('CreatedByUserId', isGuid(body.createdByUserId) ? body.createdByUserId : null);
-  rq.input('CategoryId', body.categoryId || null);
+  const categoryValue = body.category ? String(body.category).trim() : null;
+  rq.input('CategoryId', categoryValue || null);
   rq.input('Identification', body.identification || null);
   rq.input('ExistingControlInPlace', body.existingControlInPlace || null);
   rq.input('PlanOfAction', body.planOfAction || null);
   rq.input('RejectionReason', body.rejectionReason ?? null);
   const ins = await rq.query(`
     DECLARE @id UNIQUEIDENTIFIER = NEWID();
-    INSERT INTO dbo.Risks (RiskId, DepartmentId, RiskNo, Name, Description, CategoryId, Identification, ExistingControlInPlace, PlanOfAction, Impact, Likelihood, Status, OwnerId, RejectionReason, CreatedByUserId, CreatedAtUtc, UpdatedAtUtc)
-    VALUES (@id, @DepartmentId, @RiskNo, @Name, @Description, @CategoryId, @Identification, @ExistingControlInPlace, @PlanOfAction, @Impact, @Likelihood, @Status, @OwnerId, @RejectionReason, @CreatedByUserId, SYSUTCDATETIME(), SYSUTCDATETIME());
-    SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Name, r.Description,
-           r.CategoryId, c.Name AS CategoryName, r.Identification, r.ExistingControlInPlace, r.PlanOfAction,
+    INSERT INTO dbo.Risks (RiskId, DepartmentId, RiskNo, Description, CategoryId, Identification, ExistingControlInPlace, PlanOfAction, Impact, Likelihood, Status, OwnerId, RejectionReason, CreatedByUserId, CreatedAtUtc, UpdatedAtUtc)
+    VALUES (@id, @DepartmentId, @RiskNo, @Description, @CategoryId, @Identification, @ExistingControlInPlace, @PlanOfAction, @Impact, @Likelihood, @Status, @OwnerId, @RejectionReason, @CreatedByUserId, SYSUTCDATETIME(), SYSUTCDATETIME());
+    SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Description,
+           r.CategoryId AS Category, r.Identification, r.ExistingControlInPlace, r.PlanOfAction,
            r.Impact, r.Likelihood, r.Status, r.OwnerId, o.Name AS OwnerName,
            r.CreatedByUserId, u.Name AS CreatedByName,
            r.CreatedAtUtc, r.UpdatedAtUtc,
            r.RejectionReason
     FROM dbo.Risks r
     JOIN dbo.Departments d ON d.DepartmentId = r.DepartmentId
-    LEFT JOIN dbo.RiskCategories c ON c.CategoryId = r.CategoryId
     LEFT JOIN dbo.Owners o ON o.OwnerId = r.OwnerId
     LEFT JOIN dbo.Users u ON u.UserId = r.CreatedByUserId
     WHERE r.RiskId = @id;
@@ -246,14 +245,13 @@ export async function POST(req: Request) {
         { label: 'Risk ID', value: newRisk.RiskNo },
         { label: 'Department', value: newRisk.Department },
         { label: 'Description', value: newRisk.Description },
-        { label: 'Category', value: newRisk.CategoryName },
+        { label: 'Category', value: newRisk.Category },
         { label: 'Identification', value: newRisk.Identification },
         { label: 'Existing Control In Place', value: newRisk.ExistingControlInPlace },
         { label: 'Plan Of Action', value: newRisk.PlanOfAction },
         { label: 'Impact', value: newRisk.Impact },
         { label: 'Likelihood', value: newRisk.Likelihood },
         { label: 'Status', value: newRisk.Status },
-        { label: 'Rejection Reason', value: newRisk.RejectionReason },
         { label: 'Raised By', value: newRisk.CreatedByName },
         { label: 'Created At', value: newRisk.CreatedAtUtc },
       ];

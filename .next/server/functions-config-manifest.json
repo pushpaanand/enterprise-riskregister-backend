@@ -1,1 +1,0 @@
-{"version":1,"functions":{"/api/incidents/[id]/history":{},"/api/departments":{},"/api/ai/ping":{},"/api/incidents":{},"/api/departments/[id]":{},"/api/notifications/unit":{},"/api/auth/login":{},"/api/incidents/[id]":{},"/api/risks/[id]":{},"/api/ai/summary":{},"/api/risks/[id]/history":{},"/api/risks":{},"/api/users/[id]":{},"/api/users":{}}}
