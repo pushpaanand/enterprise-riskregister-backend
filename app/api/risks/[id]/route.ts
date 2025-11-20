@@ -33,6 +33,7 @@ export async function PUT(
       existingControlInPlace,
       planOfAction,
       category,
+      riskIndicator,
       changedByUserId, // optional: who made the change (GUID)
       rejectionReason,
     } = body || {};
@@ -41,7 +42,7 @@ export async function PUT(
 
     // Load existing row to detect changes
     const existingSel = await pool.request().input('RiskId', riskId).query(`
-      SELECT Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId AS Category, RejectionReason
+      SELECT Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId AS Category, RejectionReason, RiskIndicator
       FROM dbo.Risks WHERE RiskId = @RiskId
     `);
     const existing = existingSel.recordset[0] || {};
@@ -82,6 +83,10 @@ export async function PUT(
       const categoryValue = category ? String(category).trim() : null;
       rq.input('CategoryId', categoryValue || null);
     }
+    if (riskIndicator !== undefined) {
+      const riskIndicatorValue = riskIndicator ? String(riskIndicator).trim() : null;
+      rq.input('RiskIndicator', riskIndicatorValue || null);
+    }
     if (normalizedRejectionReason !== undefined) rq.input('RejectionReason', normalizedRejectionReason);
 
     // Build dynamic SET clause only for provided fields
@@ -93,6 +98,7 @@ export async function PUT(
     if (identification !== undefined) sets.push('Identification = @Identification');
     if (existingControlInPlace !== undefined) sets.push('ExistingControlInPlace = @ExistingControlInPlace');
     if (planOfAction !== undefined) sets.push('PlanOfAction = @PlanOfAction');
+    if (riskIndicator !== undefined) sets.push('RiskIndicator = @RiskIndicator');
     if (category !== undefined) sets.push('CategoryId = @CategoryId');
     if (rejectionReason !== undefined) sets.push('RejectionReason = @RejectionReason');
     sets.push('UpdatedAtUtc = SYSUTCDATETIME()');
@@ -117,6 +123,13 @@ export async function PUT(
     if (identification !== undefined && identification !== existing.Identification) changes.push({ field: 'Identification', oldVal: existing.Identification, newVal: identification });
     if (existingControlInPlace !== undefined && existingControlInPlace !== existing.ExistingControlInPlace) changes.push({ field: 'ExistingControlInPlace', oldVal: existing.ExistingControlInPlace, newVal: existingControlInPlace });
     if (planOfAction !== undefined && planOfAction !== existing.PlanOfAction) changes.push({ field: 'PlanOfAction', oldVal: existing.PlanOfAction, newVal: planOfAction });
+    if (riskIndicator !== undefined) {
+      const riskIndicatorValue = riskIndicator ? String(riskIndicator).trim() : null;
+      const existingRiskIndicator = existing.RiskIndicator ?? null;
+      if (riskIndicatorValue !== existingRiskIndicator) {
+        changes.push({ field: 'RiskIndicator', oldVal: existingRiskIndicator, newVal: riskIndicatorValue });
+      }
+    }
     if (category !== undefined) {
       const categoryValue = category ? String(category).trim() : null;
       const existingCategory = existing.Category ?? null;

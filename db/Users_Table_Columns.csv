@@ -1,0 +1,10 @@
+Column Name,Data Type,Nullable,Description
+UserId,UNIQUEIDENTIFIER,NOT NULL,Primary Key - Unique identifier for the user
+Name,NVARCHAR,NOT NULL,User full name
+Email,NVARCHAR(256),NULL,User email address
+Role,NVARCHAR,NOT NULL,"user, manager, admin, or unit_head"
+DepartmentId,UNIQUEIDENTIFIER,NULL,Foreign Key to Departments table
+EmployeeId,NVARCHAR(128),NULL,Employee ID (6 digits + @kauveryhospital.com)
+Unit,NVARCHAR(50),NULL,Unit code (e.g., KCN, KTN, KCH)
+IsUnitHead,BIT,NOT NULL,Boolean flag indicating if user is a unit head (default: 0)
+

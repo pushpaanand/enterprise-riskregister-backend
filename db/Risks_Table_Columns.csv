@@ -1,0 +1,19 @@
+Column Name,Data Type,Nullable,Description
+RiskId,UNIQUEIDENTIFIER,NOT NULL,Primary Key - Unique identifier for the risk
+RiskNo,NVARCHAR,NULL,Risk number (e.g., O001, M002)
+DepartmentId,UNIQUEIDENTIFIER,NOT NULL,Foreign Key to Departments table
+Name,NVARCHAR(MAX),NULL,Risk name (nullable)
+Description,NVARCHAR(MAX),NOT NULL,Risk description
+CategoryId,NVARCHAR(200),NULL,Category name (stored as string)
+Identification,NVARCHAR(50),NULL,Inherent risk or Residual risk
+ExistingControlInPlace,NVARCHAR(1000),NULL,Existing controls description
+PlanOfAction,NVARCHAR(1000),NULL,Plan of action description
+Impact,NVARCHAR,NOT NULL,Severe Significant Moderate Minor Negligible
+Likelihood,NVARCHAR,NOT NULL,Very likely Likely Possible Unlikely Very Unlikely
+Status,NVARCHAR,NOT NULL,Raised Rejected Open Closed In Progress New Existing Downgraded Upgraded Eliminated
+OwnerId,UNIQUEIDENTIFIER,NOT NULL,Foreign Key to Owners table
+RejectionReason,NVARCHAR(1000),NULL,Reason for rejection (if status is Rejected)
+CreatedByUserId,UNIQUEIDENTIFIER,NULL,Foreign Key to Users table - who created the risk
+CreatedAtUtc,DATETIME,NOT NULL,Creation timestamp (UTC)
+UpdatedAtUtc,DATETIME,NOT NULL,Last update timestamp (UTC)
+

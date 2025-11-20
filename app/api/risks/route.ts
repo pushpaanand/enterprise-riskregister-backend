@@ -19,20 +19,51 @@ function derivePrefixFromName(input: string | null | undefined): string {
   return match ? match[0] : 'R';
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const pool = await getPool();
-  const rs = await pool.request().query(`
+  
+  // Get query parameters for user filtering
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId');
+  const userRole = searchParams.get('role');
+  
+  let whereClause = '';
+  const rq = pool.request();
+  
+  // Filter based on user role
+  if (userRole === 'user' && userId && isGuid(userId)) {
+    // Users can only see their own risks (including raised risks)
+    whereClause = 'WHERE r.CreatedByUserId = @UserId';
+    rq.input('UserId', userId);
+  } else if (userRole === 'manager' && userId && isGuid(userId)) {
+    // Managers can see all risks in their department
+    // First, get the manager's department
+    const userDept = await pool.request().input('UserId', userId).query(`
+      SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId
+    `);
+    if (userDept.recordset.length && userDept.recordset[0].DepartmentId) {
+      whereClause = 'WHERE r.DepartmentId = @DepartmentId';
+      rq.input('DepartmentId', userDept.recordset[0].DepartmentId);
+    } else {
+      // If manager has no department, show no risks
+      whereClause = 'WHERE 1 = 0';
+    }
+  }
+  // Admin and other roles see all risks (no where clause)
+  
+  const rs = await rq.query(`
     SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Description,
            r.CategoryId AS Category,
            r.Identification, r.ExistingControlInPlace, r.PlanOfAction,
            r.Impact, r.Likelihood, r.Status, r.OwnerId, o.Name AS Owner,
            r.CreatedByUserId, u.Name AS CreatedByName,
            r.CreatedAtUtc, r.UpdatedAtUtc,
-           r.RejectionReason
+           r.RejectionReason, r.RiskIndicator
     FROM dbo.Risks r
     JOIN dbo.Departments d ON d.DepartmentId = r.DepartmentId
     LEFT JOIN dbo.Owners o ON o.OwnerId = r.OwnerId
     LEFT JOIN dbo.Users u ON u.UserId = r.CreatedByUserId
+    ${whereClause}
     ORDER BY d.Name, r.RiskNo
   `);
   const res = NextResponse.json(rs.recordset);
@@ -179,13 +210,15 @@ export async function POST(req: Request) {
   rq.input('ExistingControlInPlace', body.existingControlInPlace || null);
   rq.input('PlanOfAction', body.planOfAction || null);
   rq.input('RejectionReason', body.rejectionReason ?? null);
+  const riskIndicatorValue = body.riskIndicator ? String(body.riskIndicator).trim() : null;
+  rq.input('RiskIndicator', riskIndicatorValue || null);
   const ins = await rq.query(`
     DECLARE @id UNIQUEIDENTIFIER = NEWID();
-    INSERT INTO dbo.Risks (RiskId, DepartmentId, RiskNo, Description, CategoryId, Identification, ExistingControlInPlace, PlanOfAction, Impact, Likelihood, Status, OwnerId, RejectionReason, CreatedByUserId, CreatedAtUtc, UpdatedAtUtc)
-    VALUES (@id, @DepartmentId, @RiskNo, @Description, @CategoryId, @Identification, @ExistingControlInPlace, @PlanOfAction, @Impact, @Likelihood, @Status, @OwnerId, @RejectionReason, @CreatedByUserId, SYSUTCDATETIME(), SYSUTCDATETIME());
+    INSERT INTO dbo.Risks (RiskId, DepartmentId, RiskNo, Description, CategoryId, Identification, ExistingControlInPlace, PlanOfAction, RiskIndicator, Impact, Likelihood, Status, OwnerId, RejectionReason, CreatedByUserId, CreatedAtUtc, UpdatedAtUtc)
+    VALUES (@id, @DepartmentId, @RiskNo, @Description, @CategoryId, @Identification, @ExistingControlInPlace, @PlanOfAction, @RiskIndicator, @Impact, @Likelihood, @Status, @OwnerId, @RejectionReason, @CreatedByUserId, SYSUTCDATETIME(), SYSUTCDATETIME());
     SELECT r.RiskId, r.RiskNo, r.DepartmentId, d.Name AS Department, r.Description,
            r.CategoryId AS Category, r.Identification, r.ExistingControlInPlace, r.PlanOfAction,
-           r.Impact, r.Likelihood, r.Status, r.OwnerId, o.Name AS OwnerName,
+           r.RiskIndicator, r.Impact, r.Likelihood, r.Status, r.OwnerId, o.Name AS OwnerName,
            r.CreatedByUserId, u.Name AS CreatedByName,
            r.CreatedAtUtc, r.UpdatedAtUtc,
            r.RejectionReason
@@ -219,7 +252,7 @@ export async function POST(req: Request) {
       };
       const portalBaseCandidate =
         [process.env.RISK_PORTAL_BASE_URL, process.env.APP_BASE_URL, process.env.PORTAL_BASE_URL, process.env.NEXT_PUBLIC_RISK_PORTAL_URL, process.env.NEXT_PUBLIC_APP_BASE_URL]
-          .find((val) => val && String(val).trim().length) || 'http://localhost:3000';
+          .find((val) => val && String(val).trim().length) || 'https://zealous-tree-06aa6b200.3.azurestaticapps.net/';
       const normalizedPortalBase = portalBaseCandidate ? String(portalBaseCandidate).trim().replace(/\/$/, '') : null;
       const defaultViewLink = normalizedPortalBase ? `${normalizedPortalBase}/risks/${encodeURIComponent(stringReplacements.riskId)}` : null;
       const defaultApproveLink = normalizedPortalBase ? `${defaultViewLink}?action=approve` : null;
@@ -249,6 +282,7 @@ export async function POST(req: Request) {
         { label: 'Identification', value: newRisk.Identification },
         { label: 'Existing Control In Place', value: newRisk.ExistingControlInPlace },
         { label: 'Plan Of Action', value: newRisk.PlanOfAction },
+        { label: 'Risk Indicator', value: newRisk.RiskIndicator },
         { label: 'Impact', value: newRisk.Impact },
         { label: 'Likelihood', value: newRisk.Likelihood },
         { label: 'Status', value: newRisk.Status },
