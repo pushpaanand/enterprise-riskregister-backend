@@ -1,6 +1,5 @@
 {
   "/api/users/route": "app/api/users/route.js",
   "/api/risks/route": "app/api/risks/route.js",
-  "/api/incidents/route": "app/api/incidents/route.js",
-  "/api/risks/[id]/history/route": "app/api/risks/[id]/history/route.js"
+  "/api/incidents/route": "app/api/incidents/route.js"
 }
