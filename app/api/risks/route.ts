@@ -11,12 +11,63 @@ function isGuid(value: unknown): boolean {
 }
 
 function derivePrefixFromName(input: string | null | undefined): string {
-  if (!input) return 'R';
-  const match = String(input)
-    .trim()
-    .toUpperCase()
-    .match(/[A-Z]/);
-  return match ? match[0] : 'R';
+  if (!input) return 'RS'; // Default prefix with 2 letters
+  const normalized = String(input).trim();
+  
+  // Specific department mappings
+  const departmentPrefixMap: Record<string, string> = {
+    'clinical': 'CL',
+    'information security': 'IT',
+    'information technology': 'IT',
+    'informationtechnology': 'IT',
+    'info sec': 'IT',
+    'infosec': 'IT',
+    'it': 'IT',
+    'hr': 'HR',
+    'human resources': 'HR',
+    'humanresource': 'HR',
+    'insurance': 'IN',
+    'operations': 'OP',
+    'operation': 'OP',
+    'facilities': 'FC',
+    'facility': 'FC',
+  };
+  
+  // Normalize input: remove extra spaces and convert to lowercase
+  const lowerInput = normalized.toLowerCase().replace(/\s+/g, ' ').trim();
+  
+  // Check for exact matches (case-insensitive)
+  if (departmentPrefixMap[lowerInput]) {
+    return departmentPrefixMap[lowerInput];
+  }
+  
+  // Check for partial matches (e.g., "Clinical Department" contains "clinical")
+  // Also check without spaces for variations like "InformationSecurity"
+  const inputWithoutSpaces = lowerInput.replace(/\s+/g, '');
+  for (const [key, prefix] of Object.entries(departmentPrefixMap)) {
+    const keyWithoutSpaces = key.replace(/\s+/g, '');
+    if (lowerInput.includes(key) || inputWithoutSpaces.includes(keyWithoutSpaces)) {
+      return prefix;
+    }
+  }
+  
+  // Default: use first two alphabetic characters
+  const match = normalized.toUpperCase().match(/[A-Z]{2}/);
+  if (match) {
+    return match[0];
+  }
+  
+  // Fallback: use first letter + next available letter or 'R'
+  const firstLetter = normalized.toUpperCase().match(/[A-Z]/);
+  const secondLetter = normalized.slice(1).toUpperCase().match(/[A-Z]/);
+  if (firstLetter && secondLetter) {
+    return firstLetter[0] + secondLetter[0];
+  }
+  if (firstLetter) {
+    return firstLetter[0] + 'R';
+  }
+  
+  return 'RS'; // Final fallback
 }
 
 export async function GET(req: Request) {
@@ -163,17 +214,19 @@ export async function POST(req: Request) {
   const prefixPattern = `${prefix}%`;
 
   if (!riskNo && departmentId) {
+    // For 2-letter prefix, extract numeric part starting from position 3 (e.g., "OP001" -> "001")
     const rsNo = await pool
       .request()
       .input('dep', departmentId)
       .input('prefix', prefixPattern)
       .query(`
-      SELECT MAX(CAST(SUBSTRING(RiskNo, 2, 10) AS INT)) AS MaxNo
-      FROM dbo.Risks
-      WHERE DepartmentId = @dep
-        AND UPPER(RiskNo) LIKE @prefix
-        AND ISNUMERIC(SUBSTRING(RiskNo,2,10)) = 1
-    `);
+        SELECT MAX(CAST(SUBSTRING(RiskNo, 3, 10) AS INT)) AS MaxNo
+        FROM dbo.Risks
+        WHERE DepartmentId = @dep
+          AND UPPER(RiskNo) LIKE @prefix
+          AND LEN(RiskNo) >= 5
+          AND ISNUMERIC(SUBSTRING(RiskNo, 3, 10)) = 1
+      `);
     const nextNo = (rsNo.recordset[0]?.MaxNo || 0) + 1;
     riskNo = `${prefix}${String(nextNo).padStart(3, '0')}`;
   } else if (!riskNo) {
