@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 function withCORS(res: NextResponse) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
-  res.headers.set('Access-Control-Allow-Methods', 'PUT, OPTIONS');
+  res.headers.set('Access-Control-Allow-Methods', 'PUT, DELETE, OPTIONS');
   return res;
 }
 
@@ -116,6 +116,75 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     return withCORS(NextResponse.json({ user: updated.recordset[0] }));
   } catch (e: any) {
     return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const userId = params.id;
+    if (!userId) {
+      return withCORS(NextResponse.json({ error: 'Missing user id' }, { status: 400 }));
+    }
+
+    const pool = await getPool();
+
+    // Check if user exists
+    const existing = await pool.request().input('UserId', userId).query(`
+      SELECT UserId, Name, Role FROM dbo.Users WHERE UserId = @UserId
+    `);
+    if (!existing.recordset.length) {
+      return withCORS(NextResponse.json({ error: 'User not found' }, { status: 404 }));
+    }
+
+    // Check for dependencies - risks created by this user
+    const riskCount = await pool.request().input('UserId', userId).query(`
+      SELECT COUNT(*) AS Count FROM dbo.Risks WHERE CreatedByUserId = @UserId
+    `);
+    const hasRisks = riskCount.recordset[0]?.Count > 0;
+
+    if (hasRisks) {
+      // Option 1: Prevent deletion if user has created risks
+      return withCORS(NextResponse.json({ 
+        error: 'Cannot delete user: User has created risks. Please reassign risks first or set CreatedByUserId to NULL.' 
+      }, { status: 409 }));
+      
+      // Option 2: Set CreatedByUserId to NULL instead (uncomment if preferred)
+      // await pool.request().input('UserId', userId).query(`
+      //   UPDATE dbo.Risks SET CreatedByUserId = NULL WHERE CreatedByUserId = @UserId
+      // `);
+    }
+
+    // Check for incidents created by this user
+    const incidentCount = await pool.request().input('UserId', userId).query(`
+      SELECT COUNT(*) AS Count FROM dbo.incidents_t WHERE CreatedByUserId = @UserId
+    `);
+    const hasIncidents = incidentCount.recordset[0]?.Count > 0;
+
+    if (hasIncidents) {
+      // Set CreatedByUserId to NULL for incidents (or prevent deletion)
+      await pool.request().input('UserId', userId).query(`
+        UPDATE dbo.incidents_t SET CreatedByUserId = NULL WHERE CreatedByUserId = @UserId
+      `);
+    }
+
+    // Delete the user
+    const rq = pool.request();
+    rq.input('UserId', userId);
+    await rq.query(`DELETE FROM dbo.Users WHERE UserId = @UserId`);
+
+    return withCORS(NextResponse.json({ ok: true, message: 'User deleted successfully' }));
+  } catch (e: any) {
+    // Check for foreign key constraint violations
+    const errorMessage = String(e?.message || e);
+    if (errorMessage.includes('FOREIGN KEY') || errorMessage.includes('REFERENCES')) {
+      return withCORS(NextResponse.json({ 
+        error: 'Cannot delete user: User is referenced by other records. Please remove dependencies first.' 
+      }, { status: 409 }));
+    }
+    return withCORS(NextResponse.json({ error: errorMessage }, { status: 500 }));
   }
 }
 
