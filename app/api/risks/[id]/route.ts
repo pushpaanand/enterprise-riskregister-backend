@@ -169,7 +169,9 @@ export async function PUT(
       await histRq.query(insSql);
     }
 
-    if (statusChangedToNew) {
+    const shouldSendManagerApprovalMail = statusChangedToNew && process.env.SEND_MANAGER_APPROVAL_EMAIL === 'true';
+
+    if (shouldSendManagerApprovalMail) {
       try {
         const detailRs = await pool.request().input('RiskId', riskId).query(`
           SELECT r.RiskNo, r.Description, r.Impact, r.Likelihood,
@@ -230,6 +232,8 @@ Thanks.`;
       } catch (notifyErr) {
         console.error('Unit head approval notify failed', notifyErr);
       }
+    } else if (statusChangedToNew) {
+      console.log('Manager approval email skipped (SEND_MANAGER_APPROVAL_EMAIL not enabled)');
     }
 
     return withCORS(NextResponse.json({ ok: true }));
