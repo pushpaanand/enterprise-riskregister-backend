@@ -63,8 +63,16 @@ export async function POST(req: Request) {
     // Normalize to lowercase for matching (EmployeeId is stored in lowercase)
     const normalizedUsername = azureUsername.toLowerCase().trim();
 
+    console.log('[Azure Login] Attempting to match user:', {
+      receivedEmail: email,
+      receivedName: name,
+      azureUsername,
+      normalizedUsername,
+    });
+
     // Find user by EmployeeId (which stores the exact Azure AD username)
-    const existingByEmployeeId = await pool.request()
+    // Try exact match first
+    let existingByEmployeeId = await pool.request()
       .input('EmployeeId', normalizedUsername)
       .query(`
         SELECT TOP 1 u.UserId, u.Name, u.Role, u.DepartmentId, u.Email, u.EmployeeId, d.Name AS Department
@@ -73,18 +81,77 @@ export async function POST(req: Request) {
         WHERE LOWER(u.EmployeeId) = @EmployeeId
       `);
 
-    const user = existingByEmployeeId.recordset[0];
+    let user = existingByEmployeeId.recordset[0];
 
-    // If user not found, return error (user must exist in database with matching EmployeeId)
+    // If not found, try extracting just the employee number part (before @)
+    // In case EmployeeId is stored as just "127547" instead of "127547@kauveryhospital.com"
+    if (!user && normalizedUsername.includes('@')) {
+      const employeeNumber = normalizedUsername.split('@')[0];
+      const withSuffix = employeeNumber + '@kauveryhospital.com';
+      console.log('[Azure Login] Trying employee number match:', employeeNumber, 'or', withSuffix);
+      
+      // Try matching just the employee number
+      existingByEmployeeId = await pool.request()
+        .input('EmployeeId', employeeNumber)
+        .query(`
+          SELECT TOP 1 u.UserId, u.Name, u.Role, u.DepartmentId, u.Email, u.EmployeeId, d.Name AS Department
+          FROM dbo.Users u
+          LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
+          WHERE LOWER(u.EmployeeId) = @EmployeeId
+        `);
+      
+      user = existingByEmployeeId.recordset[0];
+      
+      // If still not found, try with @kauveryhospital.com suffix
+      if (!user) {
+        existingByEmployeeId = await pool.request()
+          .input('EmployeeId', withSuffix)
+          .query(`
+            SELECT TOP 1 u.UserId, u.Name, u.Role, u.DepartmentId, u.Email, u.EmployeeId, d.Name AS Department
+            FROM dbo.Users u
+            LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
+            WHERE LOWER(u.EmployeeId) = @EmployeeId
+          `);
+        
+        user = existingByEmployeeId.recordset[0];
+      }
+    }
+
+    // If still not found, try matching with @kauveryhospital.com suffix
+    if (!user && !normalizedUsername.includes('@kauveryhospital.com')) {
+      const withSuffix = normalizedUsername + '@kauveryhospital.com';
+      console.log('[Azure Login] Trying with @kauveryhospital.com suffix:', withSuffix);
+      
+      existingByEmployeeId = await pool.request()
+        .input('EmployeeId', withSuffix)
+        .query(`
+          SELECT TOP 1 u.UserId, u.Name, u.Role, u.DepartmentId, u.Email, u.EmployeeId, d.Name AS Department
+          FROM dbo.Users u
+          LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
+          WHERE LOWER(u.EmployeeId) = @EmployeeId
+        `);
+      
+      user = existingByEmployeeId.recordset[0];
+    }
+
+    // If user not found, return error with helpful message
     if (!user) {
+      console.error('[Azure Login] User not found for:', normalizedUsername);
       return NextResponse.json(
         { 
           error: 'User not found. Please contact administrator to add your account.',
-          detail: `No user found with EmployeeId matching: ${normalizedUsername}`
+          detail: `No user found with EmployeeId matching: ${normalizedUsername}. Please ensure your EmployeeId in the database matches your Azure AD username.`
         },
         { status: 404 }
       );
     }
+
+    console.log('[Azure Login] User found:', {
+      UserId: user.UserId,
+      Name: user.Name,
+      Role: user.Role,
+      EmployeeId: user.EmployeeId,
+    });
 
     // Update email if it's missing (keep existing EmployeeId and Role from database)
     if (!user.Email && email) {

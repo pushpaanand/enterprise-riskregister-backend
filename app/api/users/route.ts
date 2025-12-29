@@ -12,9 +12,34 @@ function withCORS(res: NextResponse) {
 
 export async function GET() {
   const pool = await getPool();
+  // Get users with all their assigned departments (from UserDepartments junction table)
   const rs = await pool.request().query(`
-    SELECT u.UserId, u.Name, u.Email, u.Role, u.DepartmentId, d.Name AS Department,
-           u.EmployeeId, u.Unit, u.IsUnitHead
+    SELECT 
+      u.UserId, 
+      u.Name, 
+      u.Email, 
+      u.Role, 
+      u.DepartmentId, 
+      d.Name AS Department,
+      u.EmployeeId, 
+      u.Unit, 
+      u.IsUnitHead,
+      -- Get all assigned departments as comma-separated list
+      STUFF((
+        SELECT ', ' + d2.Name
+        FROM dbo.UserDepartments ud
+        JOIN dbo.Departments d2 ON d2.DepartmentId = ud.DepartmentId
+        WHERE ud.UserId = u.UserId
+        ORDER BY d2.Name
+        FOR XML PATH('')
+      ), 1, 2, '') AS AssignedDepartments,
+      -- Get all assigned department IDs as comma-separated list
+      STUFF((
+        SELECT ',' + CAST(ud2.DepartmentId AS NVARCHAR(36))
+        FROM dbo.UserDepartments ud2
+        WHERE ud2.UserId = u.UserId
+        FOR XML PATH('')
+      ), 1, 1, '') AS AssignedDepartmentIds
     FROM dbo.Users u
     LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
     ORDER BY u.Name

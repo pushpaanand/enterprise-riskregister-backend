@@ -86,17 +86,37 @@ export async function GET(req: Request) {
     // Users can only see their own risks (including raised risks)
     whereClause = 'WHERE r.CreatedByUserId = @UserId';
     rq.input('UserId', userId);
-  } else if (userRole === 'manager' && userId && isGuid(userId)) {
-    // Managers can see all risks in their department
-    // First, get the manager's department
-    const userDept = await pool.request().input('UserId', userId).query(`
-      SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId
+  } else if ((userRole === 'manager' || userRole === 'user') && userId && isGuid(userId)) {
+    // Managers and users can see risks in all their assigned departments
+    // Get all departments assigned to this user (from UserDepartments junction table)
+    const userDepts = await pool.request().input('UserId', userId).query(`
+      SELECT DepartmentId 
+      FROM dbo.UserDepartments 
+      WHERE UserId = @UserId
+      UNION
+      SELECT DepartmentId 
+      FROM dbo.Users 
+      WHERE UserId = @UserId AND DepartmentId IS NOT NULL
     `);
-    if (userDept.recordset.length && userDept.recordset[0].DepartmentId) {
-      whereClause = 'WHERE r.DepartmentId = @DepartmentId';
-      rq.input('DepartmentId', userDept.recordset[0].DepartmentId);
+    
+    if (userDepts.recordset.length > 0) {
+      // Build IN clause for multiple departments
+      const deptIds = userDepts.recordset.map((row: any) => row.DepartmentId);
+      if (deptIds.length === 1) {
+        whereClause = 'WHERE r.DepartmentId = @DepartmentId';
+        rq.input('DepartmentId', deptIds[0]);
+      } else {
+        // For multiple departments, use IN clause
+        whereClause = 'WHERE r.DepartmentId IN (';
+        deptIds.forEach((deptId: string, index: number) => {
+          const paramName = `DeptId${index}`;
+          whereClause += `@${paramName},`;
+          rq.input(paramName, deptId);
+        });
+        whereClause = whereClause.slice(0, -1) + ')'; // Remove trailing comma
+      }
     } else {
-      // If manager has no department, show no risks
+      // If user has no assigned departments, show no risks
       whereClause = 'WHERE 1 = 0';
     }
   }

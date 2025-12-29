@@ -28,6 +28,8 @@ type RiskInput = {
   likelihood?: string;
   status?: string;
   department?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 function withCORS(res: NextResponse) {
@@ -70,19 +72,50 @@ export async function POST(req: Request) {
     const userPrompt =  [
       scopeLine,
       'IMPORTANT: Use ONLY the lists provided below.',
-      'Formatting rules (strict):',
-      '- Start with the header: Risk Summary',
-      '- Then write bullets for risks using "- " (no numbers, no bold).',
-      '- One sentence per bullet; each bullet on a separate line.',
-      '- Each risk bullet must include: RiskNo/Name, Impact, Likelihood, and a short recommended action.',
-      incidents && Array.isArray(incidents) && incidents.length ? '- After risk bullets, add an empty line and the header: Incident Summary' : '',
-      incidents && Array.isArray(incidents) && incidents.length ? '- Under Incident Summary, group by risk: first a bullet "- <RiskNo or Name>:", followed by sub-bullets "- " for each incident (summary, YYYY-MM, status).' : '',
-      '- Do not include extra symbols or numbering; use plain hyphens only.',
-      '- Keep language simple and clear.',
-      '- Prioritize Severe and Significant risks first.'
+      '',
+      'RISK CATEGORIZATION RULES:',
+      '1. RECENT SEVERE RISKS: Risks with Impact="Severe" that were updated within the last 30 days (check updatedAt date).',
+      '2. OLD RISKS: Risks that have NOT been updated in the last 90 days (regardless of severity).',
+      '3. OTHER RISKS: All other risks (Severe risks updated 30+ days ago, Significant, Moderate, Minor, or Negligible).',
+      '',
+      'OUTPUT FORMAT (strict - follow exactly):',
+      '',
+      'For each risk, use this format:',
+      'RiskNo: Brief description (key issues) → Risk level/impact description.',
+      '',
+      'Examples:',
+      '- IT004: Critical HR app flaws (SQL injection, IDOR, outdated framework) → High risk of data compromise.',
+      '- IT002: SmartReport POC exposed production paths (SSH/FTP/RabbitMQ) → Severe risk of PHI breach & system compromise.',
+      '- IT001: KOACH has weak authentication, SQL injection & exposed credentials → Elevated risk of unauthorized access.',
+      '- IT003: UAT Azure Blob public access misconfig → Test data only; risk now mitigated.',
+      '',
+      'SPECIAL RULES FOR OLD RISKS (not updated in 90+ days):',
+      '- For old risks, ALWAYS end with: → This risk not updated very long time please take the action against that risk.',
+      '- Example: IT005: Legacy system vulnerabilities (outdated encryption) → This risk not updated very long time please take the action against that risk.',
+      '',
+      'ORGANIZATION:',
+      '- Group risks by severity and recency:',
+      '  1. List Recent Severe Risks first (Severe impact, updated within 30 days)',
+      '  2. Then list Old Risks (not updated in 90+ days) with the special message',
+      '  3. Then list Other Risks (all remaining risks)',
+      incidents && Array.isArray(incidents) && incidents.length ? '  4. Finally, add "Incident Summary" section' : '',
+      '',
+      'FORMATTING DETAILS:',
+      '- Use format: "RiskNo: Description → Impact statement."',
+      '- One risk per line, no bullets, no numbering, no headers for individual risks.',
+      '- Keep descriptions concise (max 50 words for the description part).',
+      '- Use arrow "→" to separate description from impact.',
+      '- End each line with a period.',
+      '- Calculate dates from today: recent = updated within 30 days, old = not updated in 90+ days.',
+      '- If updatedAt is missing or invalid, treat as old risk.',
+      incidents && Array.isArray(incidents) && incidents.length ? '- After all risks, add an empty line and "Incident Summary:" header, then list incidents grouped by risk.' : ''
     ].filter(Boolean).join('\n');
 
-    const risksText = risks.map((r) => `- riskNo=${r.riskNo || ''}; name=${r.name || ''}; impact=${r.impact || ''}; likelihood=${r.likelihood || ''}; status=${r.status || ''}; dept=${r.department || ''}`).join('\n');
+    const risksText = risks.map((r) => {
+      const createdAt = r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : '';
+      const updatedAt = r.updatedAt ? new Date(r.updatedAt).toISOString().split('T')[0] : '';
+      return `- riskNo=${r.riskNo || ''}; name=${r.name || ''}; impact=${r.impact || ''}; likelihood=${r.likelihood || ''}; status=${r.status || ''}; dept=${r.department || ''}; createdAt=${createdAt}; updatedAt=${updatedAt}`;
+    }).join('\n');
     const incidentsText = (Array.isArray(incidents) ? incidents : [])
       .map((i: any) => `- riskNo=${i.RiskNo || i.riskNo || ''}; summary=${i.Summary || i.summary || ''}; occurred=${(i.OccurredAtUtc || i.occurredAt || '').toString().slice(0,7)}; status=${i.CurrentStatusText || i.currentStatusText || ''}`)
       .join('\n');
@@ -90,11 +123,11 @@ export async function POST(req: Request) {
 
 const body: any = {
       messages: [
-        { role: 'system', content: 'You are a professional risk management assistant. Always return concise bullet points using plain hyphens (- ). One sentence per bullet. No numbering, no bold, no tables.' },
+        { role: 'system', content: 'You are a professional risk management assistant. Format each risk as: "RiskNo: Brief description (key issues) → Risk level/impact description." Group risks by: (1) Recent Severe Risks (Severe, updated within 30 days), (2) Old Risks (not updated in 90+ days - end with "→ This risk not updated very long time please take the action against that risk"), (3) Other Risks. One risk per line. No bullets, no numbering, no bold. Calculate dates from today.' },
         { role: 'user', content: `${userPrompt}\n\nRisks:\n${risksText}${(incidents && Array.isArray(incidents) && incidents.length) ? `\n\nIncidents:\n${incidentsText}` : ''}` },
       ],
       temperature: 0.3,
-      max_tokens: 800,
+      max_tokens: 1200,
     };
     if (deployment) body.model = deployment; // Azure accepts model set to deployment name
 
