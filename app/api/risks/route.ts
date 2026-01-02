@@ -103,7 +103,7 @@ export async function GET(req: Request) {
       // Build IN clause for multiple departments
       const deptIds = userDepts.recordset.map((row: any) => row.DepartmentId);
       if (deptIds.length === 1) {
-        whereClause = 'WHERE r.DepartmentId = @DepartmentId';
+      whereClause = 'WHERE r.DepartmentId = @DepartmentId';
         rq.input('DepartmentId', deptIds[0]);
       } else {
         // For multiple departments, use IN clause

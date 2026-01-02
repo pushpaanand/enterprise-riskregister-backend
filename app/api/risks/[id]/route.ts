@@ -40,9 +40,24 @@ export async function PUT(
 
     const pool = await getPool();
 
+    // Get user role if changedByUserId is provided
+    let userRole: string | null = null;
+    if (changedByUserId) {
+      try {
+        const userRoleRs = await pool.request().input('UserId', changedByUserId).query(`
+          SELECT Role FROM dbo.Users WHERE UserId = @UserId
+        `);
+        if (userRoleRs.recordset.length > 0) {
+          userRole = userRoleRs.recordset[0].Role || null;
+        }
+      } catch (e) {
+        console.error('Failed to get user role', e);
+      }
+    }
+
     // Load existing row to detect changes
     const existingSel = await pool.request().input('RiskId', riskId).query(`
-      SELECT Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId AS Category, RejectionReason, RiskIndicator
+      SELECT Description, Impact, Likelihood, Status, Identification, ExistingControlInPlace, PlanOfAction, CategoryId AS Category, RejectionReason, RiskIndicator, DepartmentId
       FROM dbo.Risks WHERE RiskId = @RiskId
     `);
     const existing = existingSel.recordset[0] || {};
@@ -107,12 +122,19 @@ export async function PUT(
       return withCORS(NextResponse.json({ ok: true }));
     }
 
-    const sql = `
-      UPDATE dbo.Risks
-      SET ${sets.join(', ')}
-      WHERE RiskId = @RiskId
-    `;
-    await rq.query(sql);
+    // Check if user is a regular 'user' - if so, save to RiskHistory as pending instead of updating Risks table
+    const isUserEdit = userRole === 'user';
+    
+    if (!isUserEdit) {
+      // Manager/Admin edit: Update Risks table directly
+      const sql = `
+        UPDATE dbo.Risks
+        SET ${sets.join(', ')}
+        WHERE RiskId = @RiskId
+      `;
+      await rq.query(sql);
+    }
+    // If isUserEdit is true, we skip updating Risks table and only save to RiskHistory with Pending status
 
     // Insert history rows for changed fields
     const changes: Array<{ field: string; oldVal: any; newVal: any }> = [];
@@ -160,13 +182,92 @@ export async function PUT(
         histRq.input(`Old${idx}`, c.oldVal === undefined || c.oldVal === null ? null : String(c.oldVal));
         histRq.input(`New${idx}`, c.newVal === undefined || c.newVal === null ? null : String(c.newVal));
         histRq.input(`Reason${idx}`, c.field === 'RejectionReason' ? (c.newVal ?? null) : null);
-        valuesSql.push(`(@RiskId, SYSUTCDATETIME(), ${changedByUserId ? '@ChangedByUserId' : 'NULL'}, @Field${idx}, @Old${idx}, @New${idx}, @Reason${idx})`);
+        // For user edits, set ApprovalStatus to 'Pending', otherwise NULL (auto-approved for managers)
+        const approvalStatus = isUserEdit ? 'Pending' : null;
+        histRq.input(`ApprovalStatus${idx}`, approvalStatus);
+        valuesSql.push(`(@RiskId, SYSUTCDATETIME(), ${changedByUserId ? '@ChangedByUserId' : 'NULL'}, @Field${idx}, @Old${idx}, @New${idx}, @Reason${idx}, @ApprovalStatus${idx}, NULL, NULL)`);
       });
       const insSql = `
-        INSERT INTO dbo.RiskHistory (RiskId, ChangedAtUtc, ChangedByUserId, FieldName, OldValue, NewValue, RejectionReason)
+        INSERT INTO dbo.RiskHistory (RiskId, ChangedAtUtc, ChangedByUserId, FieldName, OldValue, NewValue, RejectionReason, ApprovalStatus, ApprovedByUserId, ApprovedAtUtc)
         VALUES ${valuesSql.join(',')};
       `;
       await histRq.query(insSql);
+    }
+
+    // Send email notification for pending edit approvals (user edits)
+    if (isUserEdit && changes.length > 0) {
+      try {
+        const riskDetailRs = await pool.request().input('RiskId', riskId).query(`
+          SELECT r.RiskNo, r.Description, d.Name AS DepartmentName, d.DepartmentId
+          FROM dbo.Risks r
+          LEFT JOIN dbo.Departments d ON d.DepartmentId = r.DepartmentId
+          WHERE r.RiskId = @RiskId
+        `);
+        const riskInfo = riskDetailRs.recordset[0];
+        
+        if (riskInfo) {
+          // Get managers for the risk's department
+          const managersRs = await pool.request().input('DepartmentId', riskInfo.DepartmentId).query(`
+            SELECT DISTINCT u.Email, u.Name
+            FROM dbo.Users u
+            WHERE u.Role = 'manager' 
+              AND u.Email IS NOT NULL
+              AND (u.DepartmentId = @DepartmentId 
+                   OR EXISTS (
+                     SELECT 1 FROM dbo.UserDepartments ud 
+                     WHERE ud.UserId = u.UserId AND ud.DepartmentId = @DepartmentId
+                   ))
+          `);
+          
+          if (managersRs.recordset.length > 0) {
+            const toList = managersRs.recordset.map((m: any) => String(m.Email).trim()).filter(Boolean);
+            if (toList.length > 0) {
+              // @ts-ignore
+              const { default: nodemailer } = await import('nodemailer');
+              const smtpUser = (process.env.SMTP_USER || 'productanalyst.pushpa@kauveryhospital.com').trim();
+              const smtpPass = (process.env.SMTP_PASS || 'fprg nbfn ftat hngt').trim();
+              const from = process.env.SMTP_FROM || smtpUser;
+              
+              if (smtpUser && smtpPass && from) {
+                const transporter = nodemailer.createTransport({
+                  service: 'gmail',
+                  auth: { user: smtpUser, pass: smtpPass },
+                  tls: { rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED === 'true' },
+                  debug: process.env.SMTP_DEBUG === 'true',
+                });
+                
+                const changedFields = changes.map(c => `- ${c.field}: "${c.oldVal || '(empty)'}" → "${c.newVal || '(empty)'}"`).join('\n');
+                
+                const subject = `Edit Approval Needed: ${riskInfo.RiskNo || 'Risk'} - ${riskInfo.DepartmentName || 'Department'}`;
+                const text = `Dear Manager,
+
+A user has submitted edits to a risk that require your approval.
+
+Risk Details:
+- Risk ID: ${riskInfo.RiskNo || 'N/A'}
+- Department: ${riskInfo.DepartmentName || 'N/A'}
+- Description: ${riskInfo.Description || 'N/A'}
+
+Changes Requested:
+${changedFields}
+
+Please review and approve or reject these changes in the risk management dashboard.
+
+Thanks.`;
+                
+                await transporter.sendMail({
+                  from,
+                  to: toList.join(','),
+                  subject,
+                  text,
+                });
+              }
+            }
+          }
+        }
+      } catch (notifyErr) {
+        console.error('Edit approval email notification failed', notifyErr);
+      }
     }
 
     const shouldSendManagerApprovalMail = statusChangedToNew && process.env.SEND_MANAGER_APPROVAL_EMAIL === 'true';
@@ -234,6 +335,15 @@ Thanks.`;
       }
     } else if (statusChangedToNew) {
       console.log('Manager approval email skipped (SEND_MANAGER_APPROVAL_EMAIL not enabled)');
+    }
+
+    // Return different response for user edits (pending approval)
+    if (isUserEdit && changes.length > 0) {
+      return withCORS(NextResponse.json({ 
+        ok: true, 
+        pendingApproval: true, 
+        message: 'Your changes have been submitted for manager approval' 
+      }));
     }
 
     return withCORS(NextResponse.json({ ok: true }));
