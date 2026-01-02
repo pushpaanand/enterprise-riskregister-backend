@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../../lib/db';
+import { logAuditEvent, getRequestMetadata } from '../../../../lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -113,7 +114,52 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       FROM dbo.Users u LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
       WHERE u.UserId = @UserId;
     `);
-    return withCORS(NextResponse.json({ user: updated.recordset[0] }));
+    const updatedUser = updated.recordset[0];
+    
+    // Log audit event for UPDATE
+    const { ipAddress, userAgent } = getRequestMetadata(request);
+    const existingUser = existing.recordset[0];
+    const changes: Array<{ field: string; oldVal: any; newVal: any }> = [];
+    
+    if (name !== undefined && name !== existingUser.Name) {
+      changes.push({ field: 'Name', oldVal: existingUser.Name, newVal: name });
+    }
+    if (email !== undefined && email !== existingUser.Email) {
+      changes.push({ field: 'Email', oldVal: existingUser.Email, newVal: email });
+    }
+    if (role !== undefined && nextRole !== existingUser.Role) {
+      changes.push({ field: 'Role', oldVal: existingUser.Role, newVal: nextRole });
+    }
+    if (departmentName !== undefined && nextDepartmentId !== existingUser.DepartmentId) {
+      changes.push({ field: 'DepartmentId', oldVal: existingUser.DepartmentId, newVal: nextDepartmentId });
+    }
+    if (unit !== undefined && unit !== existingUser.Unit) {
+      changes.push({ field: 'Unit', oldVal: existingUser.Unit, newVal: unit });
+    }
+    if (isUnitHead !== undefined && isUnitHead !== existingUser.IsUnitHead) {
+      changes.push({ field: 'IsUnitHead', oldVal: existingUser.IsUnitHead, newVal: isUnitHead });
+    }
+    if (employeeId !== undefined && employeeId !== existingUser.EmployeeId) {
+      changes.push({ field: 'EmployeeId', oldVal: existingUser.EmployeeId, newVal: employeeId });
+    }
+    
+    // Log each changed field
+    for (const change of changes) {
+      await logAuditEvent({
+        tableName: 'Users',
+        recordId: userId,
+        operation: 'UPDATE',
+        fieldName: change.field,
+        oldValue: change.oldVal,
+        newValue: change.newVal,
+        changedByUserId: null, // Could be passed from frontend if needed
+        changedByUserName: null,
+        ipAddress,
+        userAgent
+      });
+    }
+    
+    return withCORS(NextResponse.json({ user: updatedUser }));
   } catch (e: any) {
     return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
   }
@@ -170,10 +216,29 @@ export async function DELETE(
       `);
     }
 
+    // Get user details before deletion for audit log
+    const userDetail = existing.recordset[0];
+    
     // Delete the user
     const rq = pool.request();
     rq.input('UserId', userId);
     await rq.query(`DELETE FROM dbo.Users WHERE UserId = @UserId`);
+
+    // Log audit event for DELETE
+    const { ipAddress, userAgent } = getRequestMetadata(request);
+    await logAuditEvent({
+      tableName: 'Users',
+      recordId: userId,
+      operation: 'DELETE',
+      oldValue: JSON.stringify({
+        name: userDetail.Name,
+        role: userDetail.Role
+      }),
+      changedByUserId: null, // Could be passed from frontend if needed
+      changedByUserName: null,
+      ipAddress,
+      userAgent
+    });
 
     return withCORS(NextResponse.json({ ok: true, message: 'User deleted successfully' }));
   } catch (e: any) {

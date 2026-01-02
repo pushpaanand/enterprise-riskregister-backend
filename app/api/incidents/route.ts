@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../lib/db';
+import { logAuditEvent, getRequestMetadata } from '../../../lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -60,18 +61,56 @@ export async function POST(req: Request) {
   rq.input('CurrentStatusText', b.currentStatusText || null);
   rq.input('ClosedDateUtc', b.closedDateUtc || null);
   rq.input('CreatedByUserId', b.createdByUserId || null);
-  await rq.query(`
+  const result = await rq.query(`
+    DECLARE @id UNIQUEIDENTIFIER = NEWID();
     INSERT INTO dbo.incidents_t (
       IncidentId, RiskId, DepartmentId, Summary, OccurredAtUtc, Description,
       MitigationSteps, CurrentStatusText, ClosedDateUtc,
       CreatedByUserId
     )
     VALUES (
-      NEWID(), @RiskId, @DepartmentId, @Summary, @OccurredAtUtc, @Description,
+      @id, @RiskId, @DepartmentId, @Summary, @OccurredAtUtc, @Description,
       @MitigationSteps, @CurrentStatusText, @ClosedDateUtc,
       @CreatedByUserId
-    )
+    );
+    SELECT @id AS IncidentId;
   `);
+  const incidentId = result.recordset[0]?.IncidentId;
+  
+  // Log audit event for INSERT
+  if (incidentId) {
+    const { ipAddress, userAgent } = getRequestMetadata(req);
+    // Get user name
+    let userName: string | null = null;
+    if (b.createdByUserId) {
+      try {
+        const userRs = await pool.request().input('UserId', b.createdByUserId).query(`
+          SELECT Name FROM dbo.Users WHERE UserId = @UserId
+        `);
+        if (userRs.recordset.length > 0) {
+          userName = userRs.recordset[0].Name || null;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    await logAuditEvent({
+      tableName: 'incidents_t',
+      recordId: incidentId,
+      operation: 'INSERT',
+      newValue: JSON.stringify({
+        summary: b.summary,
+        description: b.description,
+        occurredAtUtc: b.occurredAtUtc
+      }),
+      changedByUserId: b.createdByUserId || null,
+      changedByUserName: userName,
+      ipAddress,
+      userAgent
+    });
+  }
+  
   return NextResponse.json({ ok: true }, { status: 201 });
 }
 

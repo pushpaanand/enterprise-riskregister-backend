@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../lib/db';
+import { logAuditEvent, getRequestMetadata } from '../../../lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -116,7 +117,27 @@ export async function POST(req: Request) {
       FROM dbo.Users u LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
       WHERE u.UserId = @id;
     `);
-    return withCORS(NextResponse.json({ user: created.recordset[0] }, { status: 201 }));
+    const newUser = created.recordset[0];
+    
+    // Log audit event for INSERT
+    const { ipAddress, userAgent } = getRequestMetadata(req);
+    await logAuditEvent({
+      tableName: 'Users',
+      recordId: newUser.UserId,
+      operation: 'INSERT',
+      newValue: JSON.stringify({
+        name: newUser.Name,
+        email: newUser.Email,
+        role: newUser.Role,
+        department: newUser.Department
+      }),
+      changedByUserId: null, // Could be passed from frontend if needed
+      changedByUserName: null,
+      ipAddress,
+      userAgent
+    });
+    
+    return withCORS(NextResponse.json({ user: newUser }, { status: 201 }));
   } catch (e: any) {
     return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
   }

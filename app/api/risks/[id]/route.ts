@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../../lib/db';
+import { logAuditEvent, getRequestMetadata } from '../../../../lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -133,6 +134,41 @@ export async function PUT(
         WHERE RiskId = @RiskId
       `;
       await rq.query(sql);
+      
+      // Log audit event for UPDATE (manager/admin edits)
+      if (changes.length > 0) {
+        const { ipAddress, userAgent } = getRequestMetadata(req);
+        // Get user name
+        let userName: string | null = null;
+        if (changedByUserId) {
+          try {
+            const userRs = await pool.request().input('UserId', changedByUserId).query(`
+              SELECT Name FROM dbo.Users WHERE UserId = @UserId
+            `);
+            if (userRs.recordset.length > 0) {
+              userName = userRs.recordset[0].Name || null;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        
+        // Log each changed field
+        for (const change of changes) {
+          await logAuditEvent({
+            tableName: 'Risks',
+            recordId: riskId,
+            operation: 'UPDATE',
+            fieldName: change.field,
+            oldValue: change.oldVal,
+            newValue: change.newVal,
+            changedByUserId: changedByUserId || null,
+            changedByUserName: userName,
+            ipAddress,
+            userAgent
+          });
+        }
+      }
     }
     // If isUserEdit is true, we skip updating Risks table and only save to RiskHistory with Pending status
 
@@ -353,7 +389,7 @@ Thanks.`;
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
@@ -362,12 +398,34 @@ export async function DELETE(
       return withCORS(NextResponse.json({ error: 'Missing risk id' }, { status: 400 }));
     }
     const pool = await getPool();
+    
+    // Get risk details before deletion for audit log
+    const riskDetailRs = await pool.request().input('RiskId', riskId).query(`
+      SELECT RiskNo, Description, Impact, Likelihood, Status
+      FROM dbo.Risks WHERE RiskId = @RiskId
+    `);
+    const riskDetail = riskDetailRs.recordset[0];
+    
     const rq = pool.request();
     rq.input('RiskId', riskId);
     // Remove dependent incidents first (foreign key protection)
     await rq.query(`DELETE FROM dbo.incidents_t WHERE RiskId = @RiskId`);
     // Delete risk
     const result = await rq.query(`DELETE FROM dbo.Risks WHERE RiskId = @RiskId`);
+    
+    // Log audit event for DELETE
+    const { ipAddress, userAgent } = getRequestMetadata(req);
+    await logAuditEvent({
+      tableName: 'Risks',
+      recordId: riskId,
+      operation: 'DELETE',
+      oldValue: riskDetail ? JSON.stringify(riskDetail) : null,
+      changedByUserId: null, // Could be passed from frontend if needed
+      changedByUserName: null,
+      ipAddress,
+      userAgent
+    });
+    
     // rowsAffected: [count] for each statement; second delete is at index 1 sometimes, but we can just reply ok
     return withCORS(NextResponse.json({ ok: true }));
   } catch (e: any) {

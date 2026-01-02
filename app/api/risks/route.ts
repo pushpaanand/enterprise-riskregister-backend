@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '../../../lib/db';
+import { logAuditEvent, getRequestMetadata } from '../../../lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -302,6 +303,27 @@ export async function POST(req: Request) {
     WHERE r.RiskId = @id;
   `);
   const newRisk = ins.recordset[0];
+  
+  // Log audit event for INSERT
+  const { ipAddress, userAgent } = getRequestMetadata(req);
+  const userName = newRisk.CreatedByName || null;
+  await logAuditEvent({
+    tableName: 'Risks',
+    recordId: newRisk.RiskId,
+    operation: 'INSERT',
+    newValue: JSON.stringify({
+      riskNo: newRisk.RiskNo,
+      description: newRisk.Description,
+      impact: body.impact,
+      likelihood: body.likelihood,
+      status: body.status
+    }),
+    changedByUserId: body.createdByUserId || null,
+    changedByUserName: userName,
+    ipAddress,
+    userAgent
+  });
+  
   // Notify department managers via SMTP (best effort)
   try {
     const mgrs = await pool.request().input('dep', newRisk.DepartmentId).query(`
