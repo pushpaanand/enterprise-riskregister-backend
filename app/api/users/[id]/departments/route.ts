@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '../../../../lib/db';
+import { getPool } from '@/lib/db';
 import sql from 'mssql';
 
 export const runtime = 'nodejs';
