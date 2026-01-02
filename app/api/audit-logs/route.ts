@@ -120,14 +120,16 @@ export async function GET(req: Request) {
     const countRs = await countRq.query(`SELECT COUNT(*) AS Total FROM dbo.AuditLogs ${countWhereClause}`);
     const total = countRs.recordset[0]?.Total || 0;
 
-    return withCORS(NextResponse.json({
+    const res = NextResponse.json({
       logs: rs.recordset,
       total,
       limit,
       offset
-    }));
+    });
+    return withCORS(res);
   } catch (e: any) {
-    return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+    const res = NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+    return withCORS(res);
   }
 }
 
@@ -179,9 +181,11 @@ export async function POST(req: Request) {
       )
     `);
 
-    return withCORS(NextResponse.json({ ok: true }, { status: 201 }));
+    const res = NextResponse.json({ ok: true }, { status: 201 });
+    return withCORS(res);
   } catch (e: any) {
-    return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+    const res = NextResponse.json({ error: String(e?.message || e) }, { status: 500 });
+    return withCORS(res);
   }
 }
 
