@@ -123,6 +123,37 @@ export async function PUT(
       return withCORS(NextResponse.json({ ok: true }));
     }
 
+    // Build changes array for tracking what was modified
+    const changes: Array<{ field: string; oldVal: any; newVal: any }> = [];
+    if (description !== undefined && description !== existing.Description) changes.push({ field: 'Description', oldVal: existing.Description, newVal: description });
+    if (impact !== undefined && impact !== existing.Impact) changes.push({ field: 'Impact', oldVal: existing.Impact, newVal: impact });
+    if (likelihood !== undefined && likelihood !== existing.Likelihood) changes.push({ field: 'Likelihood', oldVal: existing.Likelihood, newVal: likelihood });
+    if (status !== undefined && status !== existing.Status) changes.push({ field: 'Status', oldVal: existing.Status, newVal: status });
+    if (identification !== undefined && identification !== existing.Identification) changes.push({ field: 'Identification', oldVal: existing.Identification, newVal: identification });
+    if (existingControlInPlace !== undefined && existingControlInPlace !== existing.ExistingControlInPlace) changes.push({ field: 'ExistingControlInPlace', oldVal: existing.ExistingControlInPlace, newVal: existingControlInPlace });
+    if (planOfAction !== undefined && planOfAction !== existing.PlanOfAction) changes.push({ field: 'PlanOfAction', oldVal: existing.PlanOfAction, newVal: planOfAction });
+    if (riskIndicator !== undefined) {
+      const riskIndicatorValue = riskIndicator ? String(riskIndicator).trim() : null;
+      const existingRiskIndicator = existing.RiskIndicator ?? null;
+      if (riskIndicatorValue !== existingRiskIndicator) {
+        changes.push({ field: 'RiskIndicator', oldVal: existingRiskIndicator, newVal: riskIndicatorValue });
+      }
+    }
+    if (category !== undefined) {
+      const categoryValue = category ? String(category).trim() : null;
+      const existingCategory = existing.Category ?? null;
+      if (categoryValue !== existingCategory) {
+        changes.push({ field: 'Category', oldVal: existingCategory, newVal: categoryValue });
+      }
+    }
+    if (normalizedRejectionReason !== undefined) {
+      const normalizedExistingReason = existing.RejectionReason ?? null;
+      const normalizedNewReason = normalizedRejectionReason;
+      if (normalizedNewReason !== normalizedExistingReason) {
+        changes.push({ field: 'RejectionReason', oldVal: normalizedExistingReason, newVal: normalizedNewReason });
+      }
+    }
+
     // Check if user is a regular 'user' - if so, save to RiskHistory as pending instead of updating Risks table
     const isUserEdit = userRole === 'user';
     
@@ -172,36 +203,7 @@ export async function PUT(
     }
     // If isUserEdit is true, we skip updating Risks table and only save to RiskHistory with Pending status
 
-    // Insert history rows for changed fields
-    const changes: Array<{ field: string; oldVal: any; newVal: any }> = [];
-    if (description !== undefined && description !== existing.Description) changes.push({ field: 'Description', oldVal: existing.Description, newVal: description });
-    if (impact !== undefined && impact !== existing.Impact) changes.push({ field: 'Impact', oldVal: existing.Impact, newVal: impact });
-    if (likelihood !== undefined && likelihood !== existing.Likelihood) changes.push({ field: 'Likelihood', oldVal: existing.Likelihood, newVal: likelihood });
-    if (status !== undefined && status !== existing.Status) changes.push({ field: 'Status', oldVal: existing.Status, newVal: status });
-    if (identification !== undefined && identification !== existing.Identification) changes.push({ field: 'Identification', oldVal: existing.Identification, newVal: identification });
-    if (existingControlInPlace !== undefined && existingControlInPlace !== existing.ExistingControlInPlace) changes.push({ field: 'ExistingControlInPlace', oldVal: existing.ExistingControlInPlace, newVal: existingControlInPlace });
-    if (planOfAction !== undefined && planOfAction !== existing.PlanOfAction) changes.push({ field: 'PlanOfAction', oldVal: existing.PlanOfAction, newVal: planOfAction });
-    if (riskIndicator !== undefined) {
-      const riskIndicatorValue = riskIndicator ? String(riskIndicator).trim() : null;
-      const existingRiskIndicator = existing.RiskIndicator ?? null;
-      if (riskIndicatorValue !== existingRiskIndicator) {
-        changes.push({ field: 'RiskIndicator', oldVal: existingRiskIndicator, newVal: riskIndicatorValue });
-      }
-    }
-    if (category !== undefined) {
-      const categoryValue = category ? String(category).trim() : null;
-      const existingCategory = existing.Category ?? null;
-      if (categoryValue !== existingCategory) {
-        changes.push({ field: 'Category', oldVal: existingCategory, newVal: categoryValue });
-      }
-    }
-    if (normalizedRejectionReason !== undefined) {
-      const normalizedExistingReason = existing.RejectionReason ?? null;
-      const normalizedNewReason = normalizedRejectionReason;
-      if (normalizedNewReason !== normalizedExistingReason) {
-        changes.push({ field: 'RejectionReason', oldVal: normalizedExistingReason, newVal: normalizedNewReason });
-      }
-    }
+    // Insert history rows for changed fields (changes array already built above)
 
     const statusChangedToNew = changes.some(
       (c) => c.field === 'Status' && String(c.newVal || '').toLowerCase() === 'new'
