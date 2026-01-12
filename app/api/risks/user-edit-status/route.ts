@@ -40,19 +40,7 @@ export async function GET(req: Request) {
           MAX(CASE WHEN h.ApprovalStatus = 'Pending' THEN h.ChangedAtUtc END) AS LatestPendingChange,
           MAX(CASE WHEN h.ApprovalStatus = 'Approved' THEN h.ChangedAtUtc END) AS LatestApprovedChange,
           MAX(CASE WHEN h.ApprovalStatus = 'Rejected' THEN h.ChangedAtUtc END) AS LatestRejectedChange,
-          STUFF((
-            SELECT ', ' + h2.FieldName
-            FROM (
-              SELECT DISTINCT h2.FieldName
-              FROM dbo.RiskHistory h2
-              WHERE h2.RiskId = h.RiskId
-                AND h2.ApprovalStatus = h.ApprovalStatus
-                AND h2.ChangedByUserId = @UserId
-                AND h2.FieldName IS NOT NULL
-            ) AS distinctFields
-            ORDER BY distinctFields.FieldName
-            FOR XML PATH(''), TYPE
-          ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS ChangedFields
+          NULL AS ChangedFields
         FROM dbo.RiskHistory h
         WHERE h.ChangedByUserId = @UserId
           AND h.ApprovalStatus IN ('Pending', 'Approved', 'Rejected')
@@ -63,7 +51,10 @@ export async function GET(req: Request) {
     const statusMap: Record<string, any> = {};
     
     rs.recordset.forEach((row: any) => {
-      const riskId = row.RiskId;
+      // Convert GUID to string
+      const riskId = row.RiskId ? String(row.RiskId) : null;
+      if (!riskId) return;
+      
       if (!statusMap[riskId]) {
         statusMap[riskId] = {
           riskId: riskId,
@@ -77,65 +68,72 @@ export async function GET(req: Request) {
       // Determine the most relevant status (Pending > Rejected > Approved)
       const currentStatus = statusMap[riskId].status;
       const rowStatus = row.ApprovalStatus;
+      const rowLatestChange = row.LatestPendingChange || row.LatestRejectedChange || row.LatestApprovedChange;
       
-      if (!currentStatus || 
-          (rowStatus === 'Pending') ||
-          (rowStatus === 'Rejected' && currentStatus !== 'Pending') ||
-          (rowStatus === 'Approved' && currentStatus === 'Approved' && row.LatestApprovedChange > statusMap[riskId].latestChange)) {
+      // Priority: Pending > Rejected > Approved
+      // If no current status, use this row's status
+      if (!currentStatus) {
         statusMap[riskId].status = rowStatus;
         statusMap[riskId].count = row.EditCount;
-        
-        if (rowStatus === 'Pending' && row.LatestPendingChange) {
-          statusMap[riskId].latestChange = row.LatestPendingChange;
-        } else if (rowStatus === 'Rejected' && row.LatestRejectedChange) {
-          statusMap[riskId].latestChange = row.LatestRejectedChange;
-        } else if (rowStatus === 'Approved' && row.LatestApprovedChange) {
-          statusMap[riskId].latestChange = row.LatestApprovedChange;
-        }
+        statusMap[riskId].latestChange = rowLatestChange;
+      } else if (rowStatus === 'Pending') {
+        // Pending always takes priority over any existing status
+        statusMap[riskId].status = 'Pending';
+        statusMap[riskId].count = row.EditCount;
+        statusMap[riskId].latestChange = row.LatestPendingChange || rowLatestChange;
+      } else if (rowStatus === 'Rejected' && currentStatus !== 'Pending') {
+        // Rejected takes priority over Approved, but not over Pending
+        statusMap[riskId].status = 'Rejected';
+        statusMap[riskId].count = row.EditCount;
+        statusMap[riskId].latestChange = row.LatestRejectedChange || rowLatestChange;
       }
-
-      // Collect changed fields
-      if (row.ChangedFields) {
-        const fields = row.ChangedFields.split(', ');
-        statusMap[riskId].changedFields = [
-          ...new Set([...statusMap[riskId].changedFields, ...fields])
-        ];
-      }
+      // If rowStatus is 'Approved' and we already have Pending or Rejected, don't override
     });
 
-    // Convert to array and get detailed info for pending/rejected
+    // Convert to array and get detailed info for all statuses
     const results = await Promise.all(
       Object.values(statusMap).map(async (item: any) => {
-        if (item.status === 'Pending' || item.status === 'Rejected') {
-          // Get detailed changes
-          const detailRs = await pool.request()
-            .input('RiskId', sql.UniqueIdentifier, item.riskId)
-            .input('UserId', sql.UniqueIdentifier, userId)
-            .input('Status', sql.NVarChar, item.status)
-            .query(`
-              SELECT 
-                FieldName,
-                OldValue,
-                NewValue,
-                ChangedAtUtc,
-                RejectionReason
-              FROM dbo.RiskHistory
-              WHERE RiskId = @RiskId 
-                AND ChangedByUserId = @UserId
-                AND ApprovalStatus = @Status
-              ORDER BY ChangedAtUtc DESC
-            `);
+        if (!item.status) return null;
+        
+        // Get detailed changes for the status to collect changed fields
+        const detailRs = await pool.request()
+          .input('RiskId', sql.UniqueIdentifier, item.riskId)
+          .input('UserId', sql.UniqueIdentifier, userId)
+          .input('Status', sql.NVarChar, item.status)
+          .query(`
+            SELECT 
+              FieldName,
+              OldValue,
+              NewValue,
+              ChangedAtUtc,
+              RejectionReason
+            FROM dbo.RiskHistory
+            WHERE RiskId = @RiskId 
+              AND ChangedByUserId = @UserId
+              AND ApprovalStatus = @Status
+            ORDER BY ChangedAtUtc DESC
+          `);
 
-          return {
-            ...item,
-            changes: detailRs.recordset,
-          };
-        }
-        return item;
+        // Collect unique field names
+        const fieldNames = new Set<string>();
+        detailRs.recordset.forEach((row: any) => {
+          if (row.FieldName) {
+            fieldNames.add(row.FieldName);
+          }
+        });
+
+        return {
+          ...item,
+          changes: detailRs.recordset || [],
+          changedFields: Array.from(fieldNames),
+        };
       })
     );
 
-    return withCORS(NextResponse.json(results));
+    // Filter out null entries
+    const filteredResults = results.filter((item: any) => item !== null);
+
+    return withCORS(NextResponse.json(filteredResults));
   } catch (e: any) {
     return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
   }
