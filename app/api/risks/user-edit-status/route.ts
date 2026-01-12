@@ -41,13 +41,16 @@ export async function GET(req: Request) {
           MAX(CASE WHEN h.ApprovalStatus = 'Approved' THEN h.ChangedAtUtc END) AS LatestApprovedChange,
           MAX(CASE WHEN h.ApprovalStatus = 'Rejected' THEN h.ChangedAtUtc END) AS LatestRejectedChange,
           STUFF((
-            SELECT DISTINCT ', ' + h2.FieldName
-            FROM dbo.RiskHistory h2
-            WHERE h2.RiskId = h.RiskId
-              AND h2.ApprovalStatus = h.ApprovalStatus
-              AND h2.ChangedByUserId = @UserId
-              AND h2.FieldName IS NOT NULL
-            ORDER BY h2.FieldName
+            SELECT ', ' + h2.FieldName
+            FROM (
+              SELECT DISTINCT h2.FieldName
+              FROM dbo.RiskHistory h2
+              WHERE h2.RiskId = h.RiskId
+                AND h2.ApprovalStatus = h.ApprovalStatus
+                AND h2.ChangedByUserId = @UserId
+                AND h2.FieldName IS NOT NULL
+            ) AS distinctFields
+            ORDER BY distinctFields.FieldName
             FOR XML PATH(''), TYPE
           ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS ChangedFields
         FROM dbo.RiskHistory h
