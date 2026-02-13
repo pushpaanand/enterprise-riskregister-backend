@@ -12,78 +12,82 @@ function withCORS(res: NextResponse) {
 }
 
 export async function GET() {
-  const pool = await getPool();
-  // Get users with all their assigned departments (from UserDepartments and Risks tables)
-  const rs = await pool.request().query(`
-    SELECT 
-      u.UserId, 
-      u.Name, 
-      u.Email, 
-      u.Role, 
-      u.DepartmentId, 
-      d.Name AS Department,
-      u.EmployeeId, 
-      u.Unit, 
-      u.IsUnitHead,
-      -- Get all assigned departments as comma-separated list (from UserDepartments and Risks)
-      STUFF((
-        SELECT DISTINCT ', ' + d2.Name
-        FROM (
-          -- Departments from UserDepartments table
-          SELECT d2.DepartmentId, d2.Name
-          FROM dbo.UserDepartments ud
-          JOIN dbo.Departments d2 ON d2.DepartmentId = ud.DepartmentId
-          WHERE ud.UserId = u.UserId
-          
-          UNION
-          
-          -- Departments from Risks table (risks created by this user)
-          SELECT DISTINCT r.DepartmentId, d3.Name
-          FROM dbo.Risks r
-          LEFT JOIN dbo.Departments d3 ON d3.DepartmentId = r.DepartmentId
-          WHERE r.CreatedByUserId = u.UserId
-            AND r.DepartmentId IS NOT NULL
-            AND d3.Name IS NOT NULL
-        ) AS allDepts
-        ORDER BY allDepts.Name
-        FOR XML PATH(''), TYPE
-      ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS AssignedDepartments,
-      -- Get all assigned department IDs as comma-separated list
-      STUFF((
-        SELECT DISTINCT ',' + CAST(ud2.DepartmentId AS NVARCHAR(36))
-        FROM (
-          SELECT DepartmentId
-          FROM dbo.UserDepartments
-          WHERE UserId = u.UserId
-          
-          UNION
-          
-          SELECT DISTINCT DepartmentId
-          FROM dbo.Risks
-          WHERE CreatedByUserId = u.UserId
-            AND DepartmentId IS NOT NULL
-        ) AS allDeptIds
-        FOR XML PATH('')
-      ), 1, 1, '') AS AssignedDepartmentIds
-    FROM dbo.Users u
-    LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
-    ORDER BY u.Name
-  `);
-  
-  // Decode HTML entities in AssignedDepartments (fix &amp; -> &)
-  const decoded = rs.recordset.map((row: any) => {
-    if (row.AssignedDepartments) {
-      row.AssignedDepartments = row.AssignedDepartments
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-    }
-    return row;
-  });
-  
-  return withCORS(NextResponse.json(decoded));
+  try {
+    const pool = await getPool();
+    // Get users with all their assigned departments (from UserDepartments and Risks tables)
+    const rs = await pool.request().query(`
+      SELECT 
+        u.UserId, 
+        u.Name, 
+        u.Email, 
+        u.Role, 
+        u.DepartmentId, 
+        d.Name AS Department,
+        u.EmployeeId, 
+        u.Unit, 
+        u.IsUnitHead,
+        -- Get all assigned departments as comma-separated list (from UserDepartments and Risks)
+        STUFF((
+          SELECT DISTINCT ', ' + d2.Name
+          FROM (
+            -- Departments from UserDepartments table
+            SELECT d2.DepartmentId, d2.Name
+            FROM dbo.UserDepartments ud
+            JOIN dbo.Departments d2 ON d2.DepartmentId = ud.DepartmentId
+            WHERE ud.UserId = u.UserId
+            
+            UNION
+            
+            -- Departments from Risks table (risks created by this user)
+            SELECT DISTINCT r.DepartmentId, d3.Name
+            FROM dbo.Risks r
+            LEFT JOIN dbo.Departments d3 ON d3.DepartmentId = r.DepartmentId
+            WHERE r.CreatedByUserId = u.UserId
+              AND r.DepartmentId IS NOT NULL
+              AND d3.Name IS NOT NULL
+          ) AS allDepts
+          ORDER BY allDepts.Name
+          FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS AssignedDepartments,
+        -- Get all assigned department IDs as comma-separated list
+        STUFF((
+          SELECT DISTINCT ',' + CAST(ud2.DepartmentId AS NVARCHAR(36))
+          FROM (
+            SELECT DepartmentId
+            FROM dbo.UserDepartments
+            WHERE UserId = u.UserId
+            
+            UNION
+            
+            SELECT DISTINCT DepartmentId
+            FROM dbo.Risks
+            WHERE CreatedByUserId = u.UserId
+              AND DepartmentId IS NOT NULL
+          ) AS allDeptIds
+          FOR XML PATH('')
+        ), 1, 1, '') AS AssignedDepartmentIds
+      FROM dbo.Users u
+      LEFT JOIN dbo.Departments d ON d.DepartmentId = u.DepartmentId
+      ORDER BY u.Name
+    `);
+    
+    // Decode HTML entities in AssignedDepartments (fix &amp; -> &)
+    const decoded = rs.recordset.map((row: any) => {
+      if (row.AssignedDepartments) {
+        row.AssignedDepartments = row.AssignedDepartments
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'");
+      }
+      return row;
+    });
+    
+    return withCORS(NextResponse.json(decoded));
+  } catch (e: any) {
+    return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+  }
 }
 
 export async function POST(req: Request) {
