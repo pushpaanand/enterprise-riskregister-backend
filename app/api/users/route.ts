@@ -51,7 +51,7 @@ export async function GET() {
         ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS AssignedDepartments,
         -- Get all assigned department IDs as comma-separated list
         STUFF((
-          SELECT DISTINCT ',' + CAST(ud2.DepartmentId AS NVARCHAR(36))
+          SELECT DISTINCT ',' + CAST(allDeptIds.DepartmentId AS NVARCHAR(36))
           FROM (
             SELECT DepartmentId
             FROM dbo.UserDepartments
