@@ -28,10 +28,10 @@ export async function GET() {
         u.IsUnitHead,
         -- Get all assigned departments as comma-separated list (from UserDepartments and Risks)
         STUFF((
-          SELECT DISTINCT ', ' + d2.Name
+          SELECT ', ' + allDepts.Name
           FROM (
             -- Departments from UserDepartments table
-            SELECT d2.DepartmentId, d2.Name
+            SELECT DISTINCT d2.Name
             FROM dbo.UserDepartments ud
             JOIN dbo.Departments d2 ON d2.DepartmentId = ud.DepartmentId
             WHERE ud.UserId = u.UserId
@@ -39,7 +39,7 @@ export async function GET() {
             UNION
             
             -- Departments from Risks table (risks created by this user)
-            SELECT DISTINCT r.DepartmentId, d3.Name
+            SELECT DISTINCT d3.Name
             FROM dbo.Risks r
             LEFT JOIN dbo.Departments d3 ON d3.DepartmentId = r.DepartmentId
             WHERE r.CreatedByUserId = u.UserId
@@ -51,9 +51,9 @@ export async function GET() {
         ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS AssignedDepartments,
         -- Get all assigned department IDs as comma-separated list
         STUFF((
-          SELECT DISTINCT ',' + CAST(allDeptIds.DepartmentId AS NVARCHAR(36))
+          SELECT ',' + CAST(allDeptIds.DepartmentId AS NVARCHAR(36))
           FROM (
-            SELECT DepartmentId
+            SELECT DISTINCT DepartmentId
             FROM dbo.UserDepartments
             WHERE UserId = u.UserId
             
