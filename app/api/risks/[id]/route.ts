@@ -263,7 +263,7 @@ export async function PUT(
               // @ts-ignore
               const { default: nodemailer } = await import('nodemailer');
               const smtpUser = (process.env.SMTP_USER || 'productanalyst.pushpa@kauveryhospital.com').trim();
-              const smtpPass = (process.env.SMTP_PASS || 'fprg nbfn ftat hngt').trim();
+              const smtpPass = (process.env.SMTP_PASS || 'onlu dthd bwku rxmh').trim();
               const from = process.env.SMTP_FROM || smtpUser;
               
               if (smtpUser && smtpPass && from) {
@@ -331,7 +331,7 @@ Thanks.`;
             // @ts-ignore
             const { default: nodemailer } = await import('nodemailer');
             const smtpUser = (process.env.SMTP_USER || 'productanalyst.pushpa@kauveryhospital.com').trim();
-            const smtpPass = (process.env.SMTP_PASS || 'fprg nbfn ftat hngt').trim();
+            const smtpPass = (process.env.SMTP_PASS || 'onlu dthd bwku rxmh').trim();
             const from = process.env.SMTP_FROM || smtpUser;
             if (smtpUser && smtpPass && from) {
               const transporter = nodemailer.createTransport({
