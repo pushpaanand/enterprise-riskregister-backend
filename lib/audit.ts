@@ -4,7 +4,7 @@ import { getPool } from './db';
 export interface AuditLogData {
   tableName: string;
   recordId: string;
-  operation: 'INSERT' | 'UPDATE' | 'DELETE';
+  operation: 'INSERT' | 'UPDATE' | 'DELETE' | 'READ';
   fieldName?: string | null;
   oldValue?: any;
   newValue?: any;

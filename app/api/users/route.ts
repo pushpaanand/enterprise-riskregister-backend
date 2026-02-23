@@ -11,7 +11,7 @@ function withCORS(res: NextResponse) {
   return res;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const pool = await getPool();
     // Get users with all their assigned departments (from UserDepartments and Risks tables)
@@ -84,7 +84,26 @@ export async function GET() {
       return row;
     });
     
-    return withCORS(NextResponse.json(decoded));
+    const response = withCORS(NextResponse.json(decoded));
+
+    // Audit: log read access (non-blocking)
+    try {
+      const { ipAddress, userAgent } = getRequestMetadata(req);
+      await logAuditEvent({
+        tableName: 'Users',
+        recordId: 'LIST',
+        operation: 'READ',
+        changedByUserId: null,
+        changedByUserName: null,
+        ipAddress,
+        userAgent,
+        additionalInfo: `count=${decoded.length}`
+      });
+    } catch {
+      // ignore audit failures
+    }
+
+    return response;
   } catch (e: any) {
     return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
   }

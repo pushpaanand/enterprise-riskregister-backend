@@ -140,6 +140,24 @@ export async function GET(req: Request) {
   `);
   const res = NextResponse.json(rs.recordset);
   res.headers.set('Access-Control-Allow-Origin', '*');
+
+  // Audit: log read access (non-blocking)
+  try {
+    const { ipAddress, userAgent } = getRequestMetadata(req);
+    await logAuditEvent({
+      tableName: 'Risks',
+      recordId: 'LIST',
+      operation: 'READ',
+      changedByUserId: userId || null,
+      changedByUserName: null,
+      ipAddress,
+      userAgent,
+      additionalInfo: `count=${rs.recordset.length}`
+    });
+  } catch {
+    // ignore audit failures
+  }
+
   return res;
 }
 
