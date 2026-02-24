@@ -145,11 +145,12 @@ export async function GET(req: Request) {
   // Audit: log read access (non-blocking)
   try {
     const { ipAddress, userAgent } = getRequestMetadata(req);
+    const userGuid = userId && isGuid(userId) ? userId : null;
     await logAuditEvent({
       tableName: 'Risks',
       recordId: 'LIST',
       operation: 'READ',
-      changedByUserId: userId || null,
+      changedByUserId: userGuid,
       changedByUserName: userName || null,
       ipAddress,
       userAgent,

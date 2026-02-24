@@ -11,11 +11,19 @@ function withCORS(res: NextResponse) {
   return res;
 }
 
+function isGuid(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const re = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  const nil = /^00000000-0000-0000-0000-000000000000$/;
+  return re.test(value) || nil.test(value);
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const requesterId = searchParams.get('requestedBy');
     const requesterName = searchParams.get('requestedByName');
+    const requesterGuid = requesterId && isGuid(requesterId) ? requesterId : null;
 
     const pool = await getPool();
     // Get users with all their assigned departments (from UserDepartments and Risks tables)
@@ -97,7 +105,7 @@ export async function GET(req: Request) {
         tableName: 'Users',
         recordId: 'LIST',
         operation: 'READ',
-        changedByUserId: requesterId || null,
+        changedByUserId: requesterGuid,
         changedByUserName: requesterName || null,
         ipAddress,
         userAgent,
