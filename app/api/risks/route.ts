@@ -78,6 +78,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get('userId');
   const userRole = searchParams.get('role');
+  const userName = searchParams.get('userName');
   
   let whereClause = '';
   const rq = pool.request();
@@ -149,7 +150,7 @@ export async function GET(req: Request) {
       recordId: 'LIST',
       operation: 'READ',
       changedByUserId: userId || null,
-      changedByUserName: null,
+      changedByUserName: userName || null,
       ipAddress,
       userAgent,
       additionalInfo: `count=${rs.recordset.length}`

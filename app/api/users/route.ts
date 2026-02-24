@@ -13,6 +13,10 @@ function withCORS(res: NextResponse) {
 
 export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const requesterId = searchParams.get('requestedBy');
+    const requesterName = searchParams.get('requestedByName');
+
     const pool = await getPool();
     // Get users with all their assigned departments (from UserDepartments and Risks tables)
     const rs = await pool.request().query(`
@@ -93,8 +97,8 @@ export async function GET(req: Request) {
         tableName: 'Users',
         recordId: 'LIST',
         operation: 'READ',
-        changedByUserId: null,
-        changedByUserName: null,
+        changedByUserId: requesterId || null,
+        changedByUserName: requesterName || null,
         ipAddress,
         userAgent,
         additionalInfo: `count=${decoded.length}`
