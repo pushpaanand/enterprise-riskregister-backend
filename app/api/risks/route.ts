@@ -521,7 +521,7 @@ export async function POST(req: Request) {
         const smtpSecure = false; // Gmail via STARTTLS on 587 by default
         const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED === 'true';
         const smtpUser = (process.env.SMTP_USER || 'productanalyst.pushpa@kauveryhospital.com').trim();
-        const smtpPass = (process.env.SMTP_PASS || 'onlu dthd bwku rxmh').trim();
+        const smtpPass = (process.env.SMTP_PASS || 'dxoh fpzv nesc rwma').trim();
         const hasSmtpCreds = smtpUser !== '' && smtpPass !== '';
         // If SMTP credentials are missing, prefer Graph fallback (if configured)
         if (!hasSmtpCreds) {
