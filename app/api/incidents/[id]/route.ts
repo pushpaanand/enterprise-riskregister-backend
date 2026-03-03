@@ -45,7 +45,7 @@ export async function PUT(
           SELECT Role FROM dbo.Users WHERE UserId = @UserId
         `);
         if (roleRs.recordset.length > 0) {
-          userRole = roleRs.recordset[0].Role || null;
+          userRole = String(roleRs.recordset[0].Role || '').toLowerCase();
         }
       } catch (e) {
         // ignore
@@ -160,13 +160,13 @@ export async function PUT(
     const histRq = pool.request();
     histRq.input('IncidentId', incidentId);
     if (changedByUserId) histRq.input('ChangedByUserId', changedByUserId);
-    histRq.input('ApprovalStatus', approvalStatus);
     const valuesSql: string[] = [];
     changes.forEach((c, idx) => {
       histRq.input(`Field${idx}`, c.field);
       histRq.input(`Old${idx}`, c.oldVal == null ? null : String(c.oldVal));
       histRq.input(`New${idx}`, c.newVal == null ? null : String(c.newVal));
-      valuesSql.push(`(@IncidentId, SYSUTCDATETIME(), ${changedByUserId ? '@ChangedByUserId' : 'NULL'}, @Field${idx}, @Old${idx}, @New${idx}, @ApprovalStatus)`);
+      histRq.input(`ApprovalStatus${idx}`, approvalStatus);
+      valuesSql.push(`(@IncidentId, SYSUTCDATETIME(), ${changedByUserId ? '@ChangedByUserId' : 'NULL'}, @Field${idx}, @Old${idx}, @New${idx}, @ApprovalStatus${idx})`);
     });
     const insSql = `
       INSERT INTO dbo.IncidentHistory (IncidentId, ChangedAtUtc, ChangedByUserId, FieldName, OldValue, NewValue, ApprovalStatus)
