@@ -4,53 +4,69 @@ import { logAuditEvent, getRequestMetadata } from '../../../lib/audit';
 
 export const runtime = 'nodejs';
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const createdBy = searchParams.get('createdBy');
-  const riskId = searchParams.get('riskId');
-  const riskNo = searchParams.get('riskNo');
-  const department = searchParams.get('department');
-
-  const pool = await getPool();
-  const rq = pool.request();
-  let where = 'WHERE 1=1';
-  if (createdBy) {
-    rq.input('CreatedBy', createdBy);
-    where += ' AND (i.CreatedByUserId = @CreatedBy OR r.CreatedByUserId = @CreatedBy)';
-  }
-  if (riskId) {
-    rq.input('RiskId', riskId);
-    where += ' AND i.RiskId = @RiskId';
-  }
-  if (riskNo) {
-    rq.input('RiskNo', riskNo);
-    where += ' AND r.RiskNo = @RiskNo';
-  }
-  if (department) {
-    rq.input('DepName', department);
-    where += ' AND d.Name = @DepName';
-  }
-
-  const rs = await rq.query(`
-    SELECT i.IncidentId, i.RiskId, r.RiskNo,
-           i.DepartmentId, d.Name AS Department,
-           i.Summary, i.OccurredAtUtc, i.Description, i.MitigationSteps,
-           i.CurrentStatusText, i.ClosedDateUtc,
-           i.CreatedByUserId, i.CreatedAtUtc, i.UpdatedAtUtc,
-           i.ApprovalStatus, i.RejectionReason
-    FROM dbo.incidents_t i
-    JOIN dbo.Risks r ON r.RiskId = i.RiskId
-    JOIN dbo.Departments d ON d.DepartmentId = i.DepartmentId
-    ${where}
-    ORDER BY i.OccurredAtUtc DESC
-  `);
-  const res = NextResponse.json(rs.recordset);
+function withCORS(res: NextResponse) {
   res.headers.set('Access-Control-Allow-Origin', '*');
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   return res;
 }
 
+export async function OPTIONS() {
+  return withCORS(new NextResponse(null, { status: 204 }));
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const createdBy = searchParams.get('createdBy');
+    const riskId = searchParams.get('riskId');
+    const riskNo = searchParams.get('riskNo');
+    const department = searchParams.get('department');
+
+    const pool = await getPool();
+    const rq = pool.request();
+    let where = 'WHERE 1=1';
+    if (createdBy) {
+      rq.input('CreatedBy', createdBy);
+      where += ' AND (i.CreatedByUserId = @CreatedBy OR r.CreatedByUserId = @CreatedBy)';
+    }
+    if (riskId) {
+      rq.input('RiskId', riskId);
+      where += ' AND i.RiskId = @RiskId';
+    }
+    if (riskNo) {
+      rq.input('RiskNo', riskNo);
+      where += ' AND r.RiskNo = @RiskNo';
+    }
+    if (department) {
+      rq.input('DepName', department);
+      where += ' AND d.Name = @DepName';
+    }
+
+    const rs = await rq.query(`
+      SELECT i.IncidentId, i.RiskId, r.RiskNo,
+             i.DepartmentId, d.Name AS Department,
+             i.Summary, i.OccurredAtUtc, i.Description, i.MitigationSteps,
+             i.CurrentStatusText, i.ClosedDateUtc,
+             i.CreatedByUserId, i.CreatedAtUtc, i.UpdatedAtUtc,
+             i.ApprovalStatus, i.RejectionReason
+      FROM dbo.incidents_t i
+      JOIN dbo.Risks r ON r.RiskId = i.RiskId
+      JOIN dbo.Departments d ON d.DepartmentId = i.DepartmentId
+      ${where}
+      ORDER BY i.OccurredAtUtc DESC
+    `);
+    return withCORS(NextResponse.json(rs.recordset));
+  } catch (e: any) {
+    return withCORS(NextResponse.json({ error: String(e?.message || e) }, { status: 500 }));
+  }
+}
+
 export async function POST(req: Request) {
-  const b = await req.json();
+  try {
+    const b = await req.json().catch((e: any) => {
+      throw new Error('Invalid request body (expected JSON). ' + String(e?.message || e));
+    });
   // Support both camelCase (API) and PascalCase (legacy)
   const riskId = b.riskId ?? b.RiskId;
   const summary = b.summary ?? b.Summary ?? null;
@@ -61,11 +77,11 @@ export async function POST(req: Request) {
   const closedDateUtc = b.closedDateUtc ?? b.ClosedDateUtc ?? null;
   const createdByUserId = b.createdByUserId ?? b.CreatedByUserId ?? null;
 
-  if (!riskId) {
-    return NextResponse.json({ error: 'riskId is required' }, { status: 400 });
-  }
+    if (!riskId) {
+      return withCORS(NextResponse.json({ error: 'riskId is required' }, { status: 400 }));
+    }
 
-  const pool = await getPool();
+    const pool = await getPool();
 
   // Derive DepartmentId from the risk if not provided
   let departmentId = b.departmentId ?? b.DepartmentId;
@@ -77,9 +93,9 @@ export async function POST(req: Request) {
       departmentId = riskRs.recordset[0].DepartmentId;
     }
   }
-  if (!departmentId) {
-    return NextResponse.json({ error: 'Could not resolve department for the risk' }, { status: 400 });
-  }
+    if (!departmentId) {
+      return withCORS(NextResponse.json({ error: 'Could not resolve department for the risk' }, { status: 400 }));
+    }
 
   // If creator is a regular 'user', new incident requires manager approval (ApprovalStatus = 'Pending')
   let approvalStatus: string | null = null;
@@ -155,6 +171,11 @@ export async function POST(req: Request) {
     });
   }
   
-  return NextResponse.json({ ok: true }, { status: 201 });
+    return withCORS(NextResponse.json({ ok: true, incidentId }, { status: 201 }));
+  } catch (e: any) {
+    const message = String(e?.message || e);
+    const status = message.includes('riskId is required') || message.includes('Could not resolve department') ? 400 : 500;
+    return withCORS(NextResponse.json({ error: message }, { status }));
+  }
 }
 
