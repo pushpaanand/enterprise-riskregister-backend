@@ -19,6 +19,8 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const departmentName = searchParams.get('departmentName');
+    const createdByUserId = searchParams.get('createdByUserId');
 
     const pool = await getPool();
     let query = `
@@ -32,15 +34,31 @@ export async function GET(req: Request) {
       WHERE i.ApprovalStatus = 'Pending'
     `;
     const rq = pool.request();
-    if (userId) {
-      rq.input('UserId', userId);
-      query += ` AND (
-        i.DepartmentId IN (
-          SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
-          UNION
-          SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
-        )
-      )`;
+    if (createdByUserId) {
+      rq.input('CreatedByUserId', createdByUserId);
+      query += ` AND i.CreatedByUserId = @CreatedByUserId`;
+    } else if (userId) {
+      const deptRs = await pool.request().input('UserId', userId).query(`
+        SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
+        UNION
+        SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
+      `);
+      let deptIds: string[] = (deptRs.recordset || []).map((row: any) => row.DepartmentId);
+      if (deptIds.length === 0 && departmentName) {
+        const nameRs = await pool.request().input('DepName', departmentName).query(`SELECT DepartmentId FROM dbo.Departments WHERE Name = @DepName`);
+        if (nameRs.recordset?.length) deptIds = nameRs.recordset.map((row: any) => row.DepartmentId);
+      }
+      if (deptIds.length > 0) {
+        if (deptIds.length === 1) {
+          rq.input('DepartmentId', deptIds[0]);
+          query += ` AND i.DepartmentId = @DepartmentId`;
+        } else {
+          deptIds.forEach((id, idx) => rq.input(`DeptId${idx}`, id));
+          query += ` AND i.DepartmentId IN (${deptIds.map((_, idx) => `@DeptId${idx}`).join(', ')})`;
+        }
+      } else {
+        query += ` AND 1 = 0`;
+      }
     }
     query += ` ORDER BY i.CreatedAtUtc DESC`;
 

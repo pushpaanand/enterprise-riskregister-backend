@@ -14,12 +14,18 @@ export async function OPTIONS() {
   return withCORS(new NextResponse(null, { status: 204 }));
 }
 
-// Get all pending edit approvals grouped by risk
+// Get all pending edit approvals grouped by risk.
+// - changedByUserId: show only pending edits by this user (for the user who made the edits).
+// - userId + optional departmentName: show pending edits for manager's department(s). If UserDepartments/Users.DepartmentId is empty, departmentName is resolved to DepartmentId.
+// - departmentId: filter by single department.
+// - No filter: admin sees all.
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const departmentId = searchParams.get('departmentId');
     const userId = searchParams.get('userId'); // Manager's user ID to filter by their departments
+    const departmentName = searchParams.get('departmentName'); // Fallback when manager has no DepartmentId in DB
+    const changedByUserId = searchParams.get('changedByUserId'); // User's own ID to see only their pending edits
 
     const pool = await getPool();
     let query = `
@@ -43,22 +49,37 @@ export async function GET(req: Request) {
 
     const rq = pool.request();
 
-    // Filter by department if provided
-    if (departmentId) {
+    // User viewing their own pending edits
+    if (changedByUserId) {
+      rq.input('ChangedByUserId', changedByUserId);
+      query += ` AND h.ChangedByUserId = @ChangedByUserId`;
+    } else if (departmentId) {
+      // Filter by single department
       rq.input('DepartmentId', departmentId);
       query += ` AND r.DepartmentId = @DepartmentId`;
-    }
-
-    // Filter by manager's assigned departments if userId provided
-    if (userId) {
-      rq.input('UserId', userId);
-      query += ` AND (
-        r.DepartmentId IN (
-          SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
-          UNION
-          SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
-        )
-      )`;
+    } else if (userId) {
+      // Manager: resolve department IDs (UserDepartments + Users.DepartmentId; fallback to departmentName)
+      const deptRs = await pool.request().input('UserId', userId).query(`
+        SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
+        UNION
+        SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
+      `);
+      let deptIds: string[] = (deptRs.recordset || []).map((row: any) => row.DepartmentId);
+      if (deptIds.length === 0 && departmentName) {
+        const nameRs = await pool.request().input('DepName', departmentName).query(`SELECT DepartmentId FROM dbo.Departments WHERE Name = @DepName`);
+        if (nameRs.recordset?.length) deptIds = nameRs.recordset.map((row: any) => row.DepartmentId);
+      }
+      if (deptIds.length > 0) {
+        if (deptIds.length === 1) {
+          rq.input('DepartmentId', deptIds[0]);
+          query += ` AND r.DepartmentId = @DepartmentId`;
+        } else {
+          deptIds.forEach((id, idx) => rq.input(`DeptId${idx}`, id));
+          query += ` AND r.DepartmentId IN (${deptIds.map((_, idx) => `@DeptId${idx}`).join(', ')})`;
+        }
+      } else {
+        query += ` AND 1 = 0`;
+      }
     }
 
     query += `

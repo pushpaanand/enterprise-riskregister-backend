@@ -14,12 +14,18 @@ export async function OPTIONS() {
   return withCORS(new NextResponse(null, { status: 204 }));
 }
 
-// Get all pending incident edit approvals grouped by incident (mirror risks pending-edits)
+// Get all pending incident edit approvals grouped by incident.
+// - changedByUserId: show only pending edits by this user (for the user who made the edits).
+// - userId + optional departmentName: show pending edits in manager's department(s). Fallback: resolve departmentName to DepartmentId.
+// - departmentId: filter by single department.
+// - No filter: admin sees all.
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const departmentId = searchParams.get('departmentId');
     const userId = searchParams.get('userId');
+    const departmentName = searchParams.get('departmentName');
+    const changedByUserId = searchParams.get('changedByUserId');
 
     const pool = await getPool();
     let query = `
@@ -43,19 +49,35 @@ export async function GET(req: Request) {
     `;
 
     const rq = pool.request();
-    if (departmentId) {
+
+    if (changedByUserId) {
+      rq.input('ChangedByUserId', changedByUserId);
+      query += ` AND h.ChangedByUserId = @ChangedByUserId`;
+    } else if (departmentId) {
       rq.input('DepartmentId', departmentId);
       query += ` AND i.DepartmentId = @DepartmentId`;
-    }
-    if (userId) {
-      rq.input('UserId', userId);
-      query += ` AND (
-        i.DepartmentId IN (
-          SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
-          UNION
-          SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
-        )
-      )`;
+    } else if (userId) {
+      const deptRs = await pool.request().input('UserId', userId).query(`
+        SELECT DepartmentId FROM dbo.UserDepartments WHERE UserId = @UserId
+        UNION
+        SELECT DepartmentId FROM dbo.Users WHERE UserId = @UserId AND DepartmentId IS NOT NULL
+      `);
+      let deptIds: string[] = (deptRs.recordset || []).map((row: any) => row.DepartmentId);
+      if (deptIds.length === 0 && departmentName) {
+        const nameRs = await pool.request().input('DepName', departmentName).query(`SELECT DepartmentId FROM dbo.Departments WHERE Name = @DepName`);
+        if (nameRs.recordset?.length) deptIds = nameRs.recordset.map((row: any) => row.DepartmentId);
+      }
+      if (deptIds.length > 0) {
+        if (deptIds.length === 1) {
+          rq.input('DepartmentId', deptIds[0]);
+          query += ` AND i.DepartmentId = @DepartmentId`;
+        } else {
+          deptIds.forEach((id, idx) => rq.input(`DeptId${idx}`, id));
+          query += ` AND i.DepartmentId IN (${deptIds.map((_, idx) => `@DeptId${idx}`).join(', ')})`;
+        }
+      } else {
+        query += ` AND 1 = 0`;
+      }
     }
     query += `
       GROUP BY i.IncidentId, r.RiskNo, i.Summary, d.Name, d.DepartmentId, u.Name, h.ChangedByUserId
