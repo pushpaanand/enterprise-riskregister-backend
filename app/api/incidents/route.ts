@@ -4,6 +4,19 @@ import { logAuditEvent, getRequestMetadata } from '../../../lib/audit';
 
 export const runtime = 'nodejs';
 
+/** Parse a value to a Date for SQL Server datetime2. Returns null for empty/invalid. */
+function parseDate(value: unknown): Date | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return null;
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  return null;
+}
+
 function withCORS(res: NextResponse) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
@@ -70,12 +83,16 @@ export async function POST(req: Request) {
   // Support both camelCase (API) and PascalCase (legacy)
   const riskId = b.riskId ?? b.RiskId;
   const summary = b.summary ?? b.Summary ?? null;
-  const occurredAtUtc = b.occurredAtUtc ?? b.OccurredAtUtc;
+  const occurredAtUtcRaw = b.occurredAtUtc ?? b.OccurredAtUtc;
   const description = b.description ?? b.Description ?? null;
   const mitigationSteps = b.mitigationSteps ?? b.MitigationSteps ?? null;
   const currentStatusText = b.currentStatusText ?? b.CurrentStatusText ?? null;
-  const closedDateUtc = b.closedDateUtc ?? b.ClosedDateUtc ?? null;
+  const closedDateUtcRaw = b.closedDateUtc ?? b.ClosedDateUtc ?? null;
   const createdByUserId = b.createdByUserId ?? b.CreatedByUserId ?? null;
+
+  // Parse dates to avoid SQL Server "converting date/time from character string" errors
+  const occurredAtUtc = parseDate(occurredAtUtcRaw) ?? (occurredAtUtcRaw != null && occurredAtUtcRaw !== '' ? new Date() : null);
+  const closedDateUtc = parseDate(closedDateUtcRaw);
 
     if (!riskId) {
       return withCORS(NextResponse.json({ error: 'riskId is required' }, { status: 400 }));
@@ -116,7 +133,8 @@ export async function POST(req: Request) {
   rq.input('RiskId', riskId);
   rq.input('DepartmentId', departmentId);
   rq.input('Summary', summary);
-  rq.input('OccurredAtUtc', occurredAtUtc);
+  // Pass Date objects so the driver binds to datetime2 correctly (avoids date string conversion errors)
+  rq.input('OccurredAtUtc', occurredAtUtc ?? new Date());
   rq.input('Description', description);
   rq.input('MitigationSteps', mitigationSteps);
   rq.input('CurrentStatusText', currentStatusText);
