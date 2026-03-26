@@ -59,15 +59,20 @@ export async function POST(
         ORDER BY ChangedAtUtc
       `);
 
-    // Build update query for Risks table
+    // Build update query for Risks table (dedupe by field to avoid duplicate SQL params)
+    const latestByField = new Map<string, any>();
+    allPendingRs.recordset.forEach((edit: any) => {
+      if (edit?.FieldName) {
+        // rows are ordered by ChangedAtUtc, so last one wins per field
+        latestByField.set(edit.FieldName, edit.NewValue);
+      }
+    });
+
     const updateFields: string[] = [];
     const updateRq = pool.request();
     updateRq.input('RiskId', riskId);
 
-    allPendingRs.recordset.forEach((edit: any) => {
-      const field = edit.FieldName;
-      const value = edit.NewValue;
-      
+    latestByField.forEach((value: any, field: string) => {
       // Map field names to database columns
       if (field === 'Description') {
         updateRq.input('Description', value);
