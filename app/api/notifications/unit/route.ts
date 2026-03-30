@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     const { default: nodemailer } = await import('nodemailer');
     const rejectUnauthorized = process.env.SMTP_TLS_REJECT_UNAUTHORIZED === 'true';
     const smtpUser = (process.env.SMTP_USER || 'productanalyst.pushpa@kauveryhospital.com').trim();
-    const smtpPass = (process.env.SMTP_PASS || 'dxoh fpzv nesc rwma').trim();
+    const smtpPass = (process.env.SMTP_PASS || 'wuno eqhf jtqt kogp').trim();
     const from = process.env.SMTP_FROM || smtpUser;
     if (!smtpUser || !smtpPass || !from) {
       return withCORS(NextResponse.json({ error: 'SMTP not configured' }, { status: 500 }));
